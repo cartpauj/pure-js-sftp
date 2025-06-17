@@ -21,6 +21,13 @@ async function typescriptExample(): Promise<void> {
     await sftp.connect(config);
     console.log('Connected to SFTP server');
     
+    // Get SSH session ID with proper typing
+    const sessionId: Buffer | null = sftp.getSessionId();
+    if (sessionId) {
+      console.log('SSH Session ID:', sessionId.toString('hex'));
+      console.log('Session ID length:', sessionId.length);
+    }
+    
     // List with type safety
     const files: FileInfo[] = await sftp.list('/home/user');
     files.forEach(file => {

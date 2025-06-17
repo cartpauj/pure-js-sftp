@@ -18,6 +18,12 @@ async function example() {
     
     console.log('Connected to SFTP server');
     
+    // Get SSH session ID (unique identifier for this connection)
+    const sessionId = sftp.getSessionId();
+    if (sessionId) {
+      console.log('SSH Session ID:', sessionId.toString('hex'));
+    }
+    
     // List directory contents
     const files = await sftp.list('/home/user');
     console.log('Files:', files);

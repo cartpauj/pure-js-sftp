@@ -100,4 +100,12 @@ export class SSHClient extends EventEmitter {
   getState(): ConnectionState {
     return this.transport.getState();
   }
+
+  /**
+   * Get SSH session ID
+   * The session ID is generated during key exchange and remains constant for the connection
+   */
+  getSessionId(): Buffer | null {
+    return this.kexManager.getSessionId();
+  }
 }

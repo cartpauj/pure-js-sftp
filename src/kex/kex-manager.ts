@@ -214,6 +214,8 @@ export class KexManager extends EventEmitter {
       // First exchange hash becomes session ID
       if (!this.sessionId) {
         this.sessionId = this.exchangeHash;
+        // Set session ID on transport for use by other components
+        this.transport.setSessionId(this.sessionId);
       }
       
       // Derive encryption keys

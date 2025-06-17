@@ -17,6 +17,7 @@ export class SSHTransport extends EventEmitter {
   private serverVersion: string = '';
   private clientVersion: string = PROTOCOL_VERSION;
   private versionBuffer: string = '';
+  private sessionId: Buffer | null = null;
 
   constructor(config: SSHConfig) {
     super();
@@ -32,6 +33,7 @@ export class SSHTransport extends EventEmitter {
     this.versionBuffer = '';
     this.state = ConnectionState.DISCONNECTED;
     this.socket = null;
+    this.sessionId = null;
   }
 
   /**
@@ -294,6 +296,20 @@ export class SSHTransport extends EventEmitter {
    */
   isConnected(): boolean {
     return this.socket !== null && this.state !== ConnectionState.DISCONNECTED;
+  }
+
+  /**
+   * Set session ID (called by KexManager after key exchange)
+   */
+  setSessionId(sessionId: Buffer): void {
+    this.sessionId = sessionId;
+  }
+
+  /**
+   * Get session ID
+   */
+  getSessionId(): Buffer | null {
+    return this.sessionId;
   }
 
   /**

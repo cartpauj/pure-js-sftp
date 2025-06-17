@@ -49,7 +49,8 @@
     "LICENSE",
     "CHANGELOG.md",
     "MIGRATION.md",
-    "TESTING.md"
+    "TESTING.md",
+    "examples/"
   ],
   "engines": {
     "node": ">=14.0.0"

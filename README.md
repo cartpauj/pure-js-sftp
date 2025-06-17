@@ -16,7 +16,8 @@ A production-ready, pure JavaScript SFTP client with **zero native dependencies*
 - **SFTP v3 Support**: All standard file operations
 - **Advanced Features**: Streams, bulk operations, progress tracking
 - **TypeScript Support**: Full type definitions included
-- **Comprehensive Testing**: 107 tests with NIST/RFC validation and protocol compliance
+- **Complete SSH Key Support**: RSA, ECDSA, Ed25519 with passphrase protection
+- **Comprehensive Testing**: 193 tests with NIST/RFC validation and protocol compliance
 - **Production Ready**: Industry-standard cryptographic functions
 - **Memory Efficient**: Optimized for large file transfers and streaming
 
@@ -74,7 +75,8 @@ async function sftpOperations() {
       host: 'sftp.example.com',
       port: 22,
       username: 'your-username',
-      password: 'your-password'
+      privateKey: require('fs').readFileSync('/path/to/private/key'),
+      passphrase: 'key-passphrase-if-encrypted' // Optional for encrypted keys
     });
     
     // Upload a file
@@ -254,20 +256,36 @@ See [MIGRATION.md](MIGRATION.md) for detailed migration guide.
 ### Connection Management
 
 ```javascript
-// Connect with various auth methods
+// Connect with password authentication
 await sftp.connect({
   host: 'sftp.example.com',
   port: 22,                    // Default: 22
   username: 'user',
-  password: 'password',        // Password auth
-  // privateKey: privateKeyBuffer, // Key auth (future)
+  password: 'password'         // Password auth
+});
+
+// Connect with private key authentication
+await sftp.connect({
+  host: 'sftp.example.com',
+  username: 'user',
+  privateKey: fs.readFileSync('/path/to/private/key'), // RSA, ECDSA, or Ed25519
+  passphrase: 'key-passphrase' // Optional for encrypted keys
+});
+
+// Advanced connection options
+await sftp.connect({
+  host: 'sftp.example.com',
+  port: 22,
+  username: 'user',
+  privateKey: privateKeyBuffer,
+  passphrase: 'optional-passphrase',
   timeout: 30000,              // Default: 120000ms
   debug: false,                // Default: false
   keepaliveInterval: 0,        // Default: 0 (disabled)
   algorithms: {                // Custom algorithms
     kex: ['diffie-hellman-group14-sha256'],
     cipher: ['aes128-ctr', 'aes256-ctr'],
-    hmac: ['hmac-sha2-256']
+    mac: ['hmac-sha2-256']
   }
 });
 
@@ -321,6 +339,92 @@ const options = {
 };
 ```
 
+## 🔑 SSH Key Support
+
+### Supported Key Types
+
+| Key Type | Algorithm | Key Sizes | Passphrase | Status |
+|----------|-----------|-----------|------------|---------|
+| **RSA** | `rsa-sha2-256`, `rsa-sha2-512` | 2048, 3072, 4096-bit | ✅ | ✅ Recommended |
+| **ECDSA P-256** | `ecdsa-sha2-nistp256` | 256-bit | ✅ | ✅ Modern Standard |
+| **ECDSA P-384** | `ecdsa-sha2-nistp384` | 384-bit | ✅ | ✅ High Security |
+| **ECDSA P-521** | `ecdsa-sha2-nistp521` | 521-bit | ✅ | ✅ Maximum Security |
+| **Ed25519** | `ssh-ed25519` | 256-bit | ✅ | ✅ Best Performance |
+
+### Key Format Support
+
+- ✅ **PKCS#8 Format** (`-----BEGIN PRIVATE KEY-----`)
+- ✅ **PKCS#8 Encrypted** (`-----BEGIN ENCRYPTED PRIVATE KEY-----`)
+- ✅ **Traditional RSA** (`-----BEGIN RSA PRIVATE KEY-----`)
+- ✅ **String and Buffer** input types
+- ✅ **Passphrase Protection** (AES-256-CBC, AES-128-CBC, DES-EDE3-CBC)
+
+### Key Usage Examples
+
+```javascript
+const fs = require('fs');
+
+// RSA Key (most common)
+await sftp.connect({
+  host: 'example.com',
+  username: 'user',
+  privateKey: fs.readFileSync('~/.ssh/id_rsa')
+});
+
+// RSA Key with Passphrase
+await sftp.connect({
+  host: 'example.com',
+  username: 'user',
+  privateKey: fs.readFileSync('~/.ssh/id_rsa'),
+  passphrase: 'my-secret-passphrase'
+});
+
+// Ed25519 Key (modern, fastest)
+await sftp.connect({
+  host: 'example.com',
+  username: 'user',
+  privateKey: fs.readFileSync('~/.ssh/id_ed25519')
+});
+
+// ECDSA Key (good security/performance balance)
+await sftp.connect({
+  host: 'example.com',
+  username: 'user',
+  privateKey: fs.readFileSync('~/.ssh/id_ecdsa'),
+  passphrase: process.env.SSH_PASSPHRASE // From environment
+});
+
+// Buffer format
+const keyBuffer = fs.readFileSync('/path/to/key');
+await sftp.connect({
+  host: 'example.com',
+  username: 'user',
+  privateKey: keyBuffer,
+  passphrase: 'optional-passphrase'
+});
+```
+
+### Unsupported Key Types
+
+- ❌ **DSA Keys** (deprecated, insecure)
+- ❌ **ECDSA with non-NIST curves** (rare, not widely supported)
+
+### Key Generation Examples
+
+```bash
+# Generate Ed25519 key (recommended)
+ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -C "your-email@example.com"
+
+# Generate RSA 4096-bit key
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -C "your-email@example.com"
+
+# Generate ECDSA P-256 key  
+ssh-keygen -t ecdsa -b 256 -f ~/.ssh/id_ecdsa -C "your-email@example.com"
+
+# Generate encrypted key with passphrase
+ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N "your-passphrase"
+```
+
 ## 🏗️ Architecture
 
 ```
@@ -344,10 +448,10 @@ const options = {
 **Key Components:**
 - **Transport Layer**: SSH connection, version exchange, packet handling
 - **Key Exchange**: Diffie-Hellman Groups 14 & 16 with SHA-256/512
-- **Authentication**: Password (public key auth structure ready)
+- **Authentication**: Password and Public Key (RSA, ECDSA, Ed25519)
 - **SFTP Protocol**: Complete SFTP v3 implementation
 - **High-level API**: ssh2-sftp-client compatible methods
-- **Validation**: 107 tests ensuring protocol compliance and crypto interoperability
+- **Validation**: 193 tests ensuring protocol compliance and crypto interoperability
 
 ## 🔒 Security Features
 
@@ -404,12 +508,14 @@ pure-js-sftp/
 
 ## 🧪 Testing
 
-The library includes a comprehensive test suite with **107 tests** covering:
+The library includes a comprehensive test suite with **193 tests** covering:
 
 ### Test Coverage
 - **✅ Cryptographic Functions**: SHA-1/256/512, HMAC validation with NIST test vectors
 - **✅ Protocol Compliance**: SSH/SFTP packet parsing and real protocol flows  
 - **✅ Key Exchange**: Diffie-Hellman implementation with production cryptographic data
+- **✅ SSH Key Authentication**: RSA, ECDSA, Ed25519 with passphrase support
+- **✅ ssh2-sftp-client Compatibility**: API and configuration compatibility
 - **✅ Error Handling**: Malformed packet resilience and edge cases
 - **✅ Interoperability**: Direct comparison with Node.js built-in crypto functions
 - **✅ Performance**: Validates efficiency with realistic SSH/SFTP workloads

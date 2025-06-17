@@ -312,4 +312,13 @@ export class HighLevelAPI {
     if (!this.sftpClient) throw new Error('Not connected');
     return new SFTPWriteStream(this.sftpClient, remotePath, options);
   }
+
+  /**
+   * Get SSH session ID
+   * The session ID is generated during key exchange and remains constant for the connection
+   */
+  getSessionId(): Buffer | null {
+    if (!this.sshClient) throw new Error('Not connected');
+    return this.sshClient.getSessionId();
+  }
 }

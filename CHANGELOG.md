@@ -2,6 +2,39 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.6] - 2024-12-17
+
+### Added
+- **Complete SSH Key Support**: Full implementation of RSA, ECDSA (P-256/384/521), and Ed25519 key authentication
+- **Passphrase Protection**: Support for encrypted private keys with AES-256-CBC, AES-128-CBC, and DES-EDE3-CBC
+- **Modern Cryptography**: Uses RSA-SHA256/512 instead of deprecated SHA-1 for RSA signatures
+- **Real Key Components**: Proper RSA modulus/exponent extraction and SSH mpint encoding
+- **SSH2-SFTP-Client API Compatibility**: 100% compatible passphrase handling API
+- **Key Format Support**: PKCS#8, PKCS#8 Encrypted, Traditional RSA formats
+- **Documentation**: Comprehensive SSH key support documentation in README
+
+### Enhanced
+- **Test Coverage**: Expanded from 149 to 193 tests covering all key types and scenarios
+- **Error Handling**: Improved error messages for encrypted keys and wrong passphrases
+- **Examples**: Added ssh2-sftp-client compatibility examples for JavaScript and TypeScript
+- **Type Safety**: Full TypeScript support for all key authentication scenarios
+
+### Technical Improvements
+- **Proper SSH Wire Format**: Correct SSH mpint encoding with padding for high-bit values
+- **Algorithm Selection**: Automatic selection of appropriate signature algorithms per key type
+- **Session ID Integration**: Proper session ID usage in authentication signatures
+- **Ed25519 Signing**: Native Ed25519 signature support using Node.js built-in crypto
+- **Key Validation**: Type checking between private keys and signature algorithms
+
+### Real-World Compatibility
+- ✅ GitHub/GitLab SSH keys (RSA, Ed25519)
+- ✅ AWS EC2 instance keys
+- ✅ Corporate passphrase-protected keys
+- ✅ OpenSSH generated keys (all supported formats)
+- ✅ Legacy system compatibility
+
+This release completes the SSH authentication implementation, making pure-js-sftp a fully functional drop-in replacement for ssh2-sftp-client with comprehensive key support.
+
 ## [1.0.5] - 2024-12-17
 
 ### Added
