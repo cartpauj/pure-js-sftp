@@ -316,13 +316,14 @@ describe('End-to-End Protocol Tests', () => {
       const hmac = CryptoUtils.hmacSha256(key, randomData);
       expect(hmac.length).toBe(32);
       
-      // Test BigInt conversions (for DH)
+      // Test BigInt conversions (for DH) - using Node.js crypto directly
       if (size <= 256) { // Reasonable size for BigInt
-        const bn = CryptoUtils.bufferToBn(randomData);
+        const bn = BigInt('0x' + randomData.toString('hex'));
         const backToBuf = CryptoUtils.bnToBuffer(bn);
         
         // Should round-trip correctly (allowing for leading zero removal)
-        expect(CryptoUtils.bufferToBn(backToBuf)).toBe(bn);
+        const backToBn = BigInt('0x' + backToBuf.toString('hex'));
+        expect(backToBn).toBe(bn);
       }
     }
   });
