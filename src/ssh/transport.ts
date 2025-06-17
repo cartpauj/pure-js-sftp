@@ -298,17 +298,17 @@ export class SSHTransport extends EventEmitter {
   enableEncryption(
     cipherAlgo: string,
     macAlgo: string,
-    kexHash: (data: Buffer) => Buffer,
+    hashAlgo: string,
     sharedSecret: Buffer,
     exchangeHash: Buffer,
     sessionId: Buffer
   ): void {
     try {
-      this.debug(`Enabling encryption: cipher=${cipherAlgo}, mac=${macAlgo}`);
+      this.debug(`Enabling encryption: cipher=${cipherAlgo}, mac=${macAlgo}, hash=${hashAlgo}`);
       this.encryption = new SSHEncryption(
         cipherAlgo,
         macAlgo,
-        kexHash,
+        hashAlgo,
         sharedSecret,
         exchangeHash,
         sessionId

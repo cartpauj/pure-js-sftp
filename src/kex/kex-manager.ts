@@ -393,12 +393,15 @@ export class KexManager extends EventEmitter {
           throw new Error('Missing negotiated algorithms or shared secret');
         }
         
-        const kexHash = this.kexAlgorithm?.includes('sha2-256') ? require('crypto').createHash('sha256').digest : require('crypto').createHash('sha1').digest;
+        // Determine hash algorithm based on KEX method
+        const hashAlgo = this.kexAlgorithm?.includes('sha2-256') ? 'sha256' : 
+                         this.kexAlgorithm?.includes('sha2-384') ? 'sha384' :
+                         this.kexAlgorithm?.includes('sha2-512') ? 'sha512' : 'sha1';
         
         this.transport.enableEncryption(
           this.cipherAlgorithm,
           this.macAlgorithm,
-          kexHash,
+          hashAlgo,
           this.sharedSecret,
           this.exchangeHash!,
           this.sessionId!

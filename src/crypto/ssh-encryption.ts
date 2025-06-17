@@ -28,7 +28,7 @@ export interface MacInfo {
   opensslName: string;
 }
 
-// Cipher configurations (based on ssh2-streams constants)
+// Cipher configurations (based on RFC 4344 and ssh2-streams)
 export const CIPHER_INFO: Record<string, CipherInfo> = {
   'aes128-ctr': { keyLen: 16, ivLen: 16, blockSize: 16, opensslName: 'aes-128-ctr' },
   'aes256-ctr': { keyLen: 32, ivLen: 16, blockSize: 16, opensslName: 'aes-256-ctr' },
@@ -57,7 +57,7 @@ export class SSHEncryption {
   constructor(
     cipherAlgo: string,
     macAlgo: string, 
-    kexHash: (data: Buffer) => Buffer,
+    hashAlgo: string, // Hash algorithm name (e.g., 'sha256', 'sha1')
     sharedSecret: Buffer,
     exchangeHash: Buffer,
     sessionId: Buffer
@@ -76,33 +76,50 @@ export class SSHEncryption {
       throw new Error(`Unsupported MAC: ${macAlgo}`);
     }
 
-    // Derive encryption keys (based on RFC 4253)
-    this.keys = this.deriveKeys(kexHash, sharedSecret, exchangeHash, sessionId);
+    // Derive encryption keys (based on RFC 4253 Section 7.2)
+    this.keys = this.deriveKeys(hashAlgo, sharedSecret, exchangeHash, sessionId);
   }
 
   /**
    * Derive encryption keys from shared secret (RFC 4253 Section 7.2)
+   * 
+   * Key derivation follows: HASH(K || H || X || session_id)
+   * Where:
+   *   K = shared secret (mpint format)
+   *   H = exchange hash  
+   *   X = single character 'A' through 'F'
+   *   session_id = session identifier
    */
   private deriveKeys(
-    kexHash: (data: Buffer) => Buffer, 
+    hashAlgo: string,
     sharedSecret: Buffer, 
     exchangeHash: Buffer, 
     sessionId: Buffer
   ): EncryptionKeys {
+    const { createHash } = require('crypto');
     const mpintSecret = this.convertToMpint(sharedSecret);
     
-    // Key derivation: HASH(K || H || X || session_id)
-    // Where X is: 'A' for IV C->S, 'B' for IV S->C, 'C' for key C->S, etc.
-    
+    // RFC 4253 Section 7.2: Key derivation function
     const deriveKey = (letter: string, length: number): Buffer => {
-      let hash = kexHash(Buffer.concat([mpintSecret, exchangeHash, Buffer.from(letter), sessionId]));
+      // Initial hash: HASH(K || H || X || session_id)
+      let key = createHash(hashAlgo)
+        .update(mpintSecret)
+        .update(exchangeHash)
+        .update(Buffer.from(letter, 'ascii'))
+        .update(sessionId)
+        .digest();
       
-      // If key needs to be longer, keep hashing
-      while (hash.length < length) {
-        hash = Buffer.concat([hash, kexHash(Buffer.concat([mpintSecret, exchangeHash, hash]))]);
+      // If key needs to be longer, expand using HASH(K || H || key)
+      while (key.length < length) {
+        const expandedKey = createHash(hashAlgo)
+          .update(mpintSecret)
+          .update(exchangeHash)
+          .update(key)
+          .digest();
+        key = Buffer.concat([key, expandedKey]);
       }
       
-      return hash.subarray(0, length);
+      return key.subarray(0, length);
     };
 
     return {
@@ -116,34 +133,38 @@ export class SSHEncryption {
   }
 
   /**
-   * Convert buffer to SSH mpint format
+   * Convert buffer to SSH mpint format (RFC 4251 Section 5)
+   * 
+   * Represents arbitrary precision integers in two's complement format,
+   * stored as a string, 8 bits per byte, MSB first.
+   * Negative numbers have the value 1 in the most significant bit of the first byte.
+   * If the most significant bit would be set for a positive number, the number 
+   * MUST be preceded by a zero byte.
    */
   private convertToMpint(data: Buffer): Buffer {
-    // Remove leading zeros
+    if (!data || data.length === 0) {
+      return Buffer.from([0, 0, 0, 0]); // Empty mpint
+    }
+    
+    // Remove leading zeros but keep at least one byte
     let start = 0;
-    while (start < data.length && data[start] === 0) {
+    while (start < data.length - 1 && data[start] === 0) {
       start++;
     }
     
-    if (start === data.length) {
-      return Buffer.from([0, 0, 0, 0]);
+    let trimmed = data.subarray(start);
+    
+    // If MSB is set, prepend zero byte to ensure positive interpretation
+    if (trimmed.length > 0 && (trimmed[0] & 0x80)) {
+      trimmed = Buffer.concat([Buffer.from([0]), trimmed]);
     }
     
-    const trimmed = data.subarray(start);
+    // Build mpint: [length:4][data:length]
+    const result = Buffer.alloc(4 + trimmed.length);
+    result.writeUInt32BE(trimmed.length, 0);
+    trimmed.copy(result, 4);
     
-    // If high bit is set, prepend zero byte
-    if (trimmed[0] & 0x80) {
-      const result = Buffer.alloc(4 + 1 + trimmed.length);
-      result.writeUInt32BE(1 + trimmed.length, 0);
-      result[4] = 0;
-      trimmed.copy(result, 5);
-      return result;
-    } else {
-      const result = Buffer.alloc(4 + trimmed.length);
-      result.writeUInt32BE(trimmed.length, 0);
-      trimmed.copy(result, 4);
-      return result;
-    }
+    return result;
   }
 
   /**
