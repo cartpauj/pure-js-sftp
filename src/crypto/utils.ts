@@ -67,7 +67,14 @@ export class CryptoUtils {
    * Convert Buffer to big integer
    */
   static bufferToBn(buffer: Buffer): bigint {
-    return BigInt('0x' + buffer.toString('hex'));
+    if (buffer.length === 0) {
+      return 0n;
+    }
+    const hex = buffer.toString('hex');
+    if (hex === '') {
+      return 0n;
+    }
+    return BigInt('0x' + hex);
   }
 
   /**

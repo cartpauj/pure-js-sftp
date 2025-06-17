@@ -9,8 +9,8 @@
     "dev": "tsc --watch",
     "test": "jest",
     "test:watch": "jest --watch",
-    "lint": "eslint src/**/*.ts",
-    "lint:fix": "eslint src/**/*.ts --fix",
+    "lint": "ESLINT_USE_FLAT_CONFIG=false eslint src/**/*.ts",
+    "lint:fix": "ESLINT_USE_FLAT_CONFIG=false eslint src/**/*.ts --fix",
     "prepublishOnly": "npm run build"
   },
   "keywords": [

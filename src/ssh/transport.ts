@@ -16,6 +16,7 @@ export class SSHTransport extends EventEmitter {
   private packetParser: PacketParser;
   private serverVersion: string = '';
   private clientVersion: string = PROTOCOL_VERSION;
+  private versionBuffer: string = '';
 
   constructor(config: SSHConfig) {
     super();
@@ -24,11 +25,22 @@ export class SSHTransport extends EventEmitter {
   }
 
   /**
+   * Reset state for new connection
+   */
+  private reset(): void {
+    this.serverVersion = '';
+    this.versionBuffer = '';
+    this.state = ConnectionState.DISCONNECTED;
+    this.socket = null;
+  }
+
+  /**
    * Connect to SSH server
    */
   async connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
+        this.reset();
         this.state = ConnectionState.CONNECTING;
         
         // Create socket connection
@@ -130,27 +142,38 @@ export class SSHTransport extends EventEmitter {
    * Handle SSH version exchange
    */
   private handleVersionExchange(data: Buffer, resolve?: (value: void) => void, reject?: (reason: any) => void): void {
-    const dataString = data.toString('utf8');
-    const lines = dataString.split('\r\n');
+    // Accumulate data in version buffer
+    this.versionBuffer += data.toString('utf8');
     
-    for (const line of lines) {
-      if (line.startsWith('SSH-')) {
-        this.serverVersion = line.trim();
-        this.debug(`Server version: ${this.serverVersion}`);
-        
-        // Validate server version
-        if (!this.serverVersion.startsWith('SSH-2.0')) {
-          const error = new SSHError(`Unsupported SSH version: ${this.serverVersion}`, 'VERSION_ERROR');
-          if (reject) reject(error);
+    // Check if we have a complete version line (ending with \r\n)
+    if (this.versionBuffer.includes('\r\n')) {
+      const lines = this.versionBuffer.split('\r\n');
+      
+      for (const line of lines) {
+        if (line.startsWith('SSH-')) {
+          this.serverVersion = line.trim();
+          this.debug(`Server version: ${this.serverVersion}`);
+          
+          // Validate server version
+          if (!this.serverVersion.startsWith('SSH-2.0')) {
+            const error = new SSHError(`Unsupported SSH version: ${this.serverVersion}`, 'VERSION_ERROR');
+            if (reject) {
+              reject(error);
+              return;
+            }
+            throw error;
+          }
+          
+          // Version exchange complete, move to key exchange
+          this.state = ConnectionState.KEY_EXCHANGE;
+          this.emit('versionExchange', this.serverVersion);
+          
+          // Clear the version buffer
+          this.versionBuffer = '';
+          
+          if (resolve) resolve();
           return;
         }
-        
-        // Version exchange complete, move to key exchange
-        this.state = ConnectionState.KEY_EXCHANGE;
-        this.emit('versionExchange', this.serverVersion);
-        
-        if (resolve) resolve();
-        return;
       }
     }
   }
