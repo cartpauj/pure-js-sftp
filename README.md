@@ -35,9 +35,10 @@ A production-ready, pure JavaScript SFTP client with **zero native dependencies*
 
 ### 🛡️ Production Ready
 - **TypeScript Support**: Full type definitions included
-- **Comprehensive Testing**: Jest test suite with examples
-- **Error Handling**: Proper error types and recovery
-- **Memory Efficient**: Optimized for large file transfers
+- **Comprehensive Testing**: 107 tests with NIST/RFC validation and protocol compliance
+- **Industry Standards**: Cryptographic functions verified against Node.js built-ins
+- **Error Handling**: Proper error types and recovery mechanisms
+- **Memory Efficient**: Optimized for large file transfers and streaming
 
 ## 📦 Installation
 
@@ -307,6 +308,7 @@ const options = {
 - **Authentication**: Password (public key auth structure ready)
 - **SFTP Protocol**: Complete SFTP v3 implementation
 - **High-level API**: ssh2-sftp-client compatible methods
+- **Validation**: 107 tests ensuring protocol compliance and crypto interoperability
 
 ## 🔒 Security Features
 
@@ -360,6 +362,56 @@ pure-js-sftp/
 ├── test/              # Test suite
 └── docs/              # Documentation
 ```
+
+## 🧪 Testing
+
+The library includes a comprehensive test suite with **107 tests** covering:
+
+### Test Coverage
+- **✅ Cryptographic Functions**: SHA-1/256/512, HMAC validation with NIST test vectors
+- **✅ Protocol Compliance**: SSH/SFTP packet parsing and real protocol flows  
+- **✅ Key Exchange**: Diffie-Hellman implementation with production cryptographic data
+- **✅ Error Handling**: Malformed packet resilience and edge cases
+- **✅ Interoperability**: Direct comparison with Node.js built-in crypto functions
+- **✅ Performance**: Validates efficiency with realistic SSH/SFTP workloads
+
+### Running Tests
+
+```bash
+# Run complete test suite
+npm test
+
+# Run tests in watch mode  
+npm run test:watch
+
+# Run with coverage
+npm run test:coverage
+```
+
+### Test Categories
+
+**Protocol Integration Tests**
+- Real SSH handshake validation
+- SFTP packet parsing with production data
+- SSH version exchange compliance
+- Packet fragmentation handling
+
+**Cryptographic Interoperability**
+- NIST test vector validation (SHA-256)
+- RFC 4231 HMAC test vectors
+- Direct comparison with Node.js crypto module
+- BigInt arithmetic for SSH-scale numbers
+
+**End-to-End Tests**
+- Complete SFTP workflows (INIT → OPEN → READ → CLOSE)
+- Mock SSH server interactions
+- Error resilience testing
+- Performance validation
+
+### Production Validation
+All cryptographic functions are validated against industry standards to ensure production readiness and compatibility with real SSH servers.
+
+📖 **For detailed testing information, see [TESTING.md](TESTING.md)**
 
 ## 🐛 Troubleshooting
 
@@ -458,6 +510,7 @@ This project is licensed under the GPL-3.0 License - see the [LICENSE](LICENSE) 
 
 - **Issues**: [GitHub Issues](https://github.com/cartpauj/pure-js-sftp/issues)
 - **Documentation**: [README.md](README.md) and [examples/](examples/)
+- **Testing Guide**: [TESTING.md](TESTING.md) - Comprehensive testing information
 - **Migration Help**: [MIGRATION.md](MIGRATION.md)
 
 ---
