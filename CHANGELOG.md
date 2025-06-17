@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.0] - 2025-06-17
+
+### 🔐 Security Enhancements
+- **Cryptographically Secure Random Generation**: All random operations now use `crypto.randomBytes()` 
+- **Node.js Crypto Integration**: All mathematical operations delegated to Node.js crypto module
+- **Zero Manual Crypto**: Removed custom cryptographic implementations in favor of battle-tested Node.js crypto
+- **Algorithm Prioritization**: ECDH-first key exchange with modern cipher preferences
+
+### 📈 Expanded Test Coverage  
+- **238 Total Tests**: Increased from 107 to 238 tests across 20 test suites
+- **Cryptographic Interoperability**: Added ssh2 compatibility validation tests
+- **Key Exchange Testing**: Comprehensive ECDH + DH Groups 1, 14-18 validation
+- **Real-world Key Testing**: Enhanced support for production SSH key formats
+
+### 📚 Documentation Updates
+- **README.md**: Enhanced Security section highlighting cryptographically secure operations
+- **MIGRATION.md**: Added Security Enhancements section explaining improvements over ssh2-sftp-client
+- **TESTING.md**: Updated test coverage statistics and cryptographic testing details  
+- **SSH2_API_COMPATIBILITY.md**: Modern algorithm configuration examples
+
+### 🛠️ Technical Improvements
+- **ECDH Key Exchange**: Added comprehensive ECDH implementation with P-256/384/521 curves
+- **Modern Algorithms**: Prioritized GCM ciphers and ETM MAC variants
+- **ssh2 Compatibility**: Exact algorithm priorities matching ssh2 library defaults
+- **Error Handling**: Improved connection error handling and debug logging
+
 ## [1.0.6] - 2024-12-17
 
 ### Added
