@@ -239,7 +239,7 @@ describe('Real-World SSH Key Scenarios', () => {
       const authManager = new AuthManager(mockTransport, config);
       const result = (authManager as any).parsePrivateKey(keyPair.privateKey);
       
-      expect(result.algorithm).toBe('rsa-sha2-256');
+      expect(result.algorithm).toBe('rsa-sha2-512'); // 4096-bit RSA should use SHA-512
       expect(result.publicKey).toBeInstanceOf(Buffer);
       expect(result.publicKey.length).toBeGreaterThan(500); // Larger key = larger public key blob
     });

@@ -128,14 +128,38 @@ const config = {
   debug: true,           // Debug logging
   keepaliveInterval: 0,  // Keepalive frequency
   
-  // All ssh2-sftp-client options supported
+  // All ssh2-sftp-client options supported with enhanced security
   algorithms: {
-    kex: ['diffie-hellman-group14-sha256'],
-    cipher: ['aes128-ctr', 'aes256-ctr'],
-    hmac: ['hmac-sha2-256']
+    kex: ['ecdh-sha2-nistp256', 'diffie-hellman-group14-sha256'],  // ECDH preferred
+    cipher: ['aes128-gcm@openssh.com', 'aes128-ctr', 'aes256-ctr'],
+    hmac: ['hmac-sha2-256-etm@openssh.com', 'hmac-sha2-256']       // ETM preferred
   }
 };
 ```
+
+## Security Enhancements
+
+`pure-js-sftp` provides several security improvements over `ssh2-sftp-client`:
+
+### Cryptographically Secure Random Generation
+- **Before**: Mixed random number generation methods
+- **After**: All random generation uses Node.js `crypto.randomBytes()` for maximum security
+- **Impact**: SSH packet padding and SFTP message IDs are cryptographically secure
+
+### Algorithm Prioritization
+- **Modern KEX**: ECDH algorithms (nistp256/384/521) prioritized over legacy DH
+- **Enhanced Ciphers**: GCM and ETM variants preferred for better security
+- **ssh2 Compatibility**: Algorithm order exactly matches ssh2 library for maximum compatibility
+
+### Crypto Implementation
+- **Battle-tested**: All cryptographic operations use Node.js crypto module (no custom implementations)
+- **Reduced Attack Surface**: Eliminated manual mathematical implementations
+- **SSH Wire Format**: Proper SSH mpint format handling following ssh2's exact logic
+
+### No Breaking Changes
+- All existing configurations continue to work
+- Legacy algorithms still supported for compatibility
+- API remains 100% identical
 
 ## Testing Your Migration
 

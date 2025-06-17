@@ -41,9 +41,18 @@ export class SSHClient extends EventEmitter {
 
     // KEX events
     this.kexManager.on('kexComplete', () => {
+      this.debug('KEX complete, starting authentication');
       this.authManager.authenticate();
     });
-    this.kexManager.on('error', (error) => this.emit('error', error));
+    this.kexManager.on('error', (error) => {
+      this.debug(`KEX error: ${error.message}`);
+      this.emit('error', error);
+    });
+    this.kexManager.on('close', () => {
+      this.debug('KEX manager closed');
+      this.connected = false;
+      this.emit('close');
+    });
 
     // Auth events
     this.authManager.on('authComplete', () => {
@@ -107,5 +116,14 @@ export class SSHClient extends EventEmitter {
    */
   getSessionId(): Buffer | null {
     return this.kexManager.getSessionId();
+  }
+
+  /**
+   * Debug logging
+   */
+  private debug(message: string): void {
+    if (this.config.debug) {
+      console.log(`[SSH Client] ${message}`);
+    }
   }
 }

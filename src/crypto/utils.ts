@@ -20,6 +20,13 @@ export class CryptoUtils {
   }
 
   /**
+   * SHA-384 hash
+   */
+  static sha384(data: Buffer): Buffer {
+    return createHash('sha384').update(data).digest();
+  }
+
+  /**
    * SHA-512 hash
    */
   static sha512(data: Buffer): Buffer {
@@ -63,37 +70,6 @@ export class CryptoUtils {
     return Buffer.from(paddedHex, 'hex');
   }
 
-  /**
-   * Convert Buffer to big integer
-   */
-  static bufferToBn(buffer: Buffer): bigint {
-    if (buffer.length === 0) {
-      return 0n;
-    }
-    const hex = buffer.toString('hex');
-    if (hex === '') {
-      return 0n;
-    }
-    return BigInt('0x' + hex);
-  }
-
-  /**
-   * Modular exponentiation for large integers
-   */
-  static modPow(base: bigint, exponent: bigint, modulus: bigint): bigint {
-    if (modulus === 1n) return 0n;
-    
-    let result = 1n;
-    base = base % modulus;
-    
-    while (exponent > 0n) {
-      if (exponent % 2n === 1n) {
-        result = (result * base) % modulus;
-      }
-      exponent = exponent >> 1n;
-      base = (base * base) % modulus;
-    }
-    
-    return result;
-  }
+  // Note: Removed manual crypto implementations (bufferToBn, modPow) as they're not needed.
+  // All cryptographic operations are handled by Node.js crypto module for security and correctness.
 }

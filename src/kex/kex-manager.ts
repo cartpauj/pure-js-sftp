@@ -5,6 +5,7 @@
 
 import { EventEmitter } from 'events';
 import { DiffieHellmanKex } from './diffie-hellman';
+import { ECDHKeyExchange } from './ecdh-exchange';
 import { PacketBuilder, PacketReader } from '../ssh/packet';
 import { SSHTransport } from '../ssh/transport';
 import { KEXInitMessage, SSHError } from '../ssh/types';
@@ -17,6 +18,7 @@ export class KexManager extends EventEmitter {
   private serverKexInit: Buffer | null = null;
   private kexAlgorithm: string | null = null;
   private dhKex: DiffieHellmanKex | null = null;
+  private ecdhKex: ECDHKeyExchange | null = null;
   private exchangeHash: Buffer | null = null;
   private sessionId: Buffer | null = null;
 
@@ -36,6 +38,16 @@ export class KexManager extends EventEmitter {
 
     this.transport.on('kexinit', (payload: Buffer) => {
       this.handleServerKexInit(payload);
+    });
+
+    this.transport.on('error', (error: Error) => {
+      this.debug(`Transport error: ${error.message}`);
+      this.emit('error', error);
+    });
+
+    this.transport.on('close', () => {
+      this.debug('Transport connection closed during KEX');
+      this.emit('error', new SSHError('Connection closed during key exchange', 'KEX_CONNECTION_LOST'));
     });
   }
 
@@ -116,6 +128,7 @@ export class KexManager extends EventEmitter {
       }
       
       this.debug(`Chosen KEX algorithm: ${this.kexAlgorithm}`);
+      this.debug(`KEX algorithm type: ${this.kexAlgorithm.startsWith('ecdh-sha2-') ? 'ECDH' : 'DH'}`);
       
       // Start Diffie-Hellman exchange
       this.startDHExchange();
@@ -131,8 +144,11 @@ export class KexManager extends EventEmitter {
   private parseKexInitPayload(payload: Buffer): KEXInitMessage {
     const reader = new PacketReader(payload);
     
+    // Read cookie (16 bytes) - need to read it properly with offset management
+    const cookie = reader.readRawBytes(16);
+    
     return {
-      cookie: reader.getRemainingBytes().subarray(0, 16),
+      cookie: cookie,
       kex_algorithms: reader.readString().split(','),
       server_host_key_algorithms: reader.readString().split(','),
       encryption_algorithms_client_to_server: reader.readString().split(','),
@@ -161,9 +177,51 @@ export class KexManager extends EventEmitter {
   }
 
   /**
-   * Start Diffie-Hellman key exchange
+   * Start key exchange (ECDH or DH depending on chosen algorithm)
    */
   private startDHExchange(): void {
+    if (!this.kexAlgorithm) {
+      throw new Error('KEX algorithm not chosen');
+    }
+    
+    // Determine if this is ECDH or DH based on algorithm name
+    if (this.kexAlgorithm.startsWith('ecdh-sha2-')) {
+      this.startECDHExchange();
+    } else {
+      this.startClassicDHExchange();
+    }
+  }
+
+  /**
+   * Start ECDH key exchange
+   */
+  private startECDHExchange(): void {
+    if (!this.kexAlgorithm) {
+      throw new Error('KEX algorithm not chosen');
+    }
+    
+    this.ecdhKex = new ECDHKeyExchange(this.kexAlgorithm);
+    
+    // Send KEXECDH_INIT
+    const kexecdhInitPayload = this.ecdhKex.createKexecdhInit();
+    this.debug(`Sending KEXECDH_INIT with payload size: ${kexecdhInitPayload.length} bytes`);
+    this.debug(`KEXECDH_INIT payload hex: ${kexecdhInitPayload.subarray(0, 32).toString('hex')}...`);
+    this.transport.sendPacket(SSH_MSG.KEXECDH_INIT, kexecdhInitPayload);
+    this.debug('Sent KEXECDH_INIT packet');
+    
+    // Listen for KEXECDH_REPLY (uses same message type as KEXDH_REPLY)
+    this.transport.once('kexdhReply', (payload: Buffer) => {
+      this.debug('Received KEXECDH_REPLY event, processing...');
+      this.handleKexecdhReply(payload);
+    });
+    
+    this.setupKexTimeout();
+  }
+
+  /**
+   * Start classic Diffie-Hellman key exchange
+   */
+  private startClassicDHExchange(): void {
     if (!this.kexAlgorithm) {
       throw new Error('KEX algorithm not chosen');
     }
@@ -172,13 +230,73 @@ export class KexManager extends EventEmitter {
     
     // Send KEXDH_INIT
     const kexdhInitPayload = this.dhKex.createKexdhInit();
+    this.debug(`Sending KEXDH_INIT with payload size: ${kexdhInitPayload.length} bytes`);
+    this.debug(`KEXDH_INIT payload hex: ${kexdhInitPayload.subarray(0, 32).toString('hex')}...`);
     this.transport.sendPacket(SSH_MSG.KEXDH_INIT, kexdhInitPayload);
-    this.debug('Sent KEXDH_INIT');
+    this.debug('Sent KEXDH_INIT packet');
     
     // Listen for KEXDH_REPLY
     this.transport.once('kexdhReply', (payload: Buffer) => {
+      this.debug('Received KEXDH_REPLY event, processing...');
       this.handleKexdhReply(payload);
     });
+    
+    this.setupKexTimeout();
+  }
+
+  /**
+   * Setup timeout for KEX exchange
+   */
+  private setupKexTimeout(): void {
+    // Add a timeout to detect if we never get reply
+    const kexTimeout = setTimeout(() => {
+      this.debug('Timeout waiting for KEX reply');
+      this.emit('error', new SSHError('Timeout waiting for KEX reply', 'KEX_TIMEOUT'));
+    }, 30000); // 30 second timeout
+    
+    // Clear timeout when we get the reply
+    this.transport.once('kexdhReply', () => {
+      clearTimeout(kexTimeout);
+    });
+  }
+
+  /**
+   * Handle KEXECDH_REPLY from server
+   */
+  private handleKexecdhReply(payload: Buffer): void {
+    if (!this.ecdhKex || !this.clientKexInit || !this.serverKexInit) {
+      throw new Error('ECDH KEX state invalid');
+    }
+    
+    try {
+      this.debug(`Processing KEXECDH_REPLY payload of ${payload.length} bytes`);
+      const {
+        serverHostKey,
+        serverPublicKey,
+        signature: _signature,
+        sharedSecret
+      } = this.ecdhKex.processKexecdhReply(payload);
+      
+      this.debug(`KEXECDH_REPLY processed: hostKey=${serverHostKey.length}b, pubKey=${serverPublicKey.length}b, secret=${sharedSecret.length}b`);
+      
+      // Generate exchange hash
+      this.exchangeHash = this.ecdhKex.generateExchangeHash(
+        this.transport.getClientVersion(),
+        this.transport.getServerVersion(),
+        this.clientKexInit,
+        this.serverKexInit,
+        serverHostKey,
+        this.ecdhKex.getClientPublicKey(),
+        serverPublicKey,
+        sharedSecret
+      );
+      
+      this.completeKeyExchange(sharedSecret);
+      
+    } catch (error: any) {
+      this.debug(`KEXECDH_REPLY error: ${error?.message || error}`);
+      this.emit('error', new SSHError(`KEXECDH_REPLY failed: ${error?.message || error}`, 'KEXECDH_FAILED'));
+    }
   }
 
   /**
@@ -190,6 +308,7 @@ export class KexManager extends EventEmitter {
     }
     
     try {
+      this.debug(`Processing KEXDH_REPLY payload of ${payload.length} bytes`);
       const {
         serverHostKey,
         serverPublicKey,
@@ -197,7 +316,7 @@ export class KexManager extends EventEmitter {
         sharedSecret
       } = this.dhKex.processKexdhReply(payload);
       
-      this.debug('Received KEXDH_REPLY');
+      this.debug(`KEXDH_REPLY processed: hostKey=${serverHostKey.length}b, pubKey=${serverPublicKey.length}b, secret=${sharedSecret.length}b`);
       
       // Generate exchange hash
       this.exchangeHash = this.dhKex.generateExchangeHash(
@@ -211,36 +330,51 @@ export class KexManager extends EventEmitter {
         sharedSecret
       );
       
-      // First exchange hash becomes session ID
-      if (!this.sessionId) {
-        this.sessionId = this.exchangeHash;
-        // Set session ID on transport for use by other components
-        this.transport.setSessionId(this.sessionId);
-      }
+      this.completeKeyExchange(sharedSecret);
       
-      // Derive encryption keys
-      const keys = this.dhKex.deriveKeys(sharedSecret, this.exchangeHash, this.sessionId);
-      
-      // TODO: Verify server signature
-      // TODO: Set up encryption with derived keys
-      
-      // Send NEWKEYS
-      this.transport.sendPacket(SSH_MSG.NEWKEYS);
-      this.debug('Sent NEWKEYS');
-      
-      // Wait for server NEWKEYS
-      this.transport.once('newkeys', () => {
-        this.debug('Received NEWKEYS');
-        this.emit('kexComplete', {
-          sessionId: this.sessionId,
-          exchangeHash: this.exchangeHash,
-          keys
-        });
-      });
-      
-    } catch (error) {
-      this.emit('error', new SSHError(`KEXDH_REPLY failed: ${error}`, 'KEXDH_FAILED'));
+    } catch (error: any) {
+      this.debug(`KEXDH_REPLY error: ${error?.message || error}`);
+      this.emit('error', new SSHError(`KEXDH_REPLY failed: ${error?.message || error}`, 'KEXDH_FAILED'));
     }
+  }
+
+  /**
+   * Complete key exchange (common for both ECDH and DH)
+   */
+  private completeKeyExchange(sharedSecret: Buffer): void {
+    // First exchange hash becomes session ID
+    if (!this.sessionId) {
+      this.sessionId = this.exchangeHash!;
+      // Set session ID on transport for use by other components
+      this.transport.setSessionId(this.sessionId);
+    }
+    
+    // Derive encryption keys using the appropriate KEX method
+    let keys;
+    if (this.ecdhKex) {
+      keys = this.ecdhKex.deriveKeys(sharedSecret, this.exchangeHash!, this.sessionId);
+    } else if (this.dhKex) {
+      keys = this.dhKex.deriveKeys(sharedSecret, this.exchangeHash!, this.sessionId);
+    } else {
+      throw new Error('No KEX method available for key derivation');
+    }
+    
+    // TODO: Verify server signature
+    // TODO: Set up encryption with derived keys
+    
+    // Send NEWKEYS
+    this.transport.sendPacket(SSH_MSG.NEWKEYS);
+    this.debug('Sent NEWKEYS');
+    
+    // Wait for server NEWKEYS
+    this.transport.once('newkeys', () => {
+      this.debug('Received NEWKEYS');
+      this.emit('kexComplete', {
+        sessionId: this.sessionId,
+        exchangeHash: this.exchangeHash,
+        keys
+      });
+    });
   }
 
   /**
@@ -261,7 +395,7 @@ export class KexManager extends EventEmitter {
    * Debug logging
    */
   private debug(message: string): void {
-    // TODO: Use transport debug flag
+    // Always log for now to help with debugging
     console.log(`[KEX Manager] ${message}`);
   }
 }

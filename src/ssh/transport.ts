@@ -5,7 +5,7 @@
 
 import { Socket } from 'net';
 import { EventEmitter } from 'events';
-import { PacketParser, PacketBuilder } from './packet';
+import { PacketParser, PacketBuilder, PacketReader } from './packet';
 import { SSHConfig, SSHPacket, ConnectionState, SSHError } from './types';
 import { SSH_MSG, PROTOCOL_VERSION } from './constants';
 
@@ -93,7 +93,7 @@ export class SSHTransport extends EventEmitter {
     });
 
     this.socket.on('close', () => {
-      this.debug('Socket closed');
+      this.debug(`Socket closed (was in state: ${this.state})`);
       this.state = ConnectionState.DISCONNECTED;
       this.emit('close');
     });
@@ -113,7 +113,7 @@ export class SSHTransport extends EventEmitter {
    * Handle incoming data from socket
    */
   private handleIncomingData(data: Buffer, resolve?: (value: void) => void, reject?: (reason: any) => void): void {
-    this.debug(`Received ${data.length} bytes`);
+    this.debug(`Received ${data.length} bytes: ${data.subarray(0, Math.min(32, data.length)).toString('hex')}${data.length > 32 ? '...' : ''}`);
 
     if (this.state === ConnectionState.VERSION_EXCHANGE) {
       this.handleVersionExchange(data, resolve, reject);
@@ -184,11 +184,14 @@ export class SSHTransport extends EventEmitter {
    * Handle SSH packets
    */
   private handleSSHPacket(packet: SSHPacket): void {
-    this.debug(`Received SSH packet type: ${packet.type}`);
+    this.debug(`Received SSH packet type: ${packet.type}, payload size: ${packet.payload.length}`);
     
     switch (packet.type) {
       case SSH_MSG.KEXINIT:
         this.emit('kexinit', packet.payload);
+        break;
+      case SSH_MSG.KEXDH_REPLY:  // ADDED
+        this.emit('kexdhReply', packet.payload);
         break;
       case SSH_MSG.NEWKEYS:
         this.emit('newkeys');
@@ -202,6 +205,9 @@ export class SSHTransport extends EventEmitter {
         break;
       case SSH_MSG.USERAUTH_FAILURE:
         this.emit('authFailure', packet.payload);
+        break;
+      case SSH_MSG.USERAUTH_PK_OK:  // ADDED  
+        this.emit('pkOk', packet.payload);
         break;
       case SSH_MSG.CHANNEL_OPEN_CONFIRMATION:
         this.emit('channelOpenConfirmation', packet.payload);
@@ -221,9 +227,19 @@ export class SSHTransport extends EventEmitter {
   /**
    * Handle disconnect message
    */
-  private handleDisconnect(_payload: Buffer): void {
-    // TODO: Parse disconnect reason and message
-    this.debug('Server disconnected');
+  private handleDisconnect(payload: Buffer): void {
+    try {
+      const reader = new PacketReader(payload);
+      const reasonCode = reader.readUInt32();
+      const description = reader.readString();
+      const languageTag = reader.readString();
+      
+      this.debug(`Server disconnected: reason=${reasonCode}, description="${description}", language="${languageTag}"`);
+      this.emit('error', new SSHError(`Server disconnected: ${description} (code: ${reasonCode})`, 'DISCONNECT'));
+    } catch (error) {
+      this.debug(`Server disconnected (could not parse reason): ${error}`);
+      this.emit('error', new SSHError('Server disconnected unexpectedly', 'DISCONNECT'));
+    }
     this.disconnect();
   }
 

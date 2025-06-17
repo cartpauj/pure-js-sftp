@@ -282,10 +282,10 @@ await sftp.connect({
   timeout: 30000,              // Default: 120000ms
   debug: false,                // Default: false
   keepaliveInterval: 0,        // Default: 0 (disabled)
-  algorithms: {                // Custom algorithms
-    kex: ['diffie-hellman-group14-sha256'],
-    cipher: ['aes128-ctr', 'aes256-ctr'],
-    mac: ['hmac-sha2-256']
+  algorithms: {                // Custom algorithms (follows ssh2 defaults)
+    kex: ['ecdh-sha2-nistp256', 'diffie-hellman-group14-sha256'],
+    cipher: ['aes128-gcm@openssh.com', 'aes128-ctr', 'aes256-ctr'],
+    mac: ['hmac-sha2-256-etm@openssh.com', 'hmac-sha2-256']
   }
 });
 
@@ -446,20 +446,23 @@ ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N "your-passphrase"
 ```
 
 **Key Components:**
-- **Transport Layer**: SSH connection, version exchange, packet handling
-- **Key Exchange**: Diffie-Hellman Groups 14 & 16 with SHA-256/512
-- **Authentication**: Password and Public Key (RSA, ECDSA, Ed25519)
-- **SFTP Protocol**: Complete SFTP v3 implementation
-- **High-level API**: ssh2-sftp-client compatible methods
-- **Validation**: 193 tests ensuring protocol compliance and crypto interoperability
+- **Transport Layer**: SSH connection, version exchange, cryptographically secure packet handling
+- **Key Exchange**: ECDH (nistp256/384/521) + Diffie-Hellman Groups 1, 14-18 with SHA-1/256/512
+- **Authentication**: Password and Public Key (RSA-2048/4096, ECDSA P-256/384/521, Ed25519)
+- **SFTP Protocol**: Complete SFTP v3 implementation with secure random message IDs
+- **High-level API**: ssh2-sftp-client compatible methods with enhanced security
+- **Validation**: 238 tests ensuring protocol compliance, crypto interoperability, and ssh2 compatibility
 
 ## 🔒 Security Features
 
-- **Modern Encryption**: AES-128/256-CTR, AES-128/256-GCM
-- **Strong Key Exchange**: Diffie-Hellman Groups 14, 16, 18
-- **Message Authentication**: HMAC-SHA2-256, HMAC-SHA2-512
-- **Host Key Verification**: SSH host key checking
-- **Secure Random**: Cryptographically secure random number generation
+- **Modern Encryption**: AES-128/256-CTR, AES-128/256-GCM, ChaCha20-Poly1305
+- **Advanced Key Exchange**: ECDH (nistp256/384/521), Diffie-Hellman Groups 1, 14-18
+- **Message Authentication**: HMAC-SHA2-256/512, HMAC-SHA1 (with ETM variants)
+- **Host Key Verification**: SSH host key checking with modern algorithms
+- **Cryptographically Secure**: All random generation uses Node.js `crypto.randomBytes()`
+- **Battle-tested Crypto**: All mathematical operations delegated to Node.js crypto module
+- **ssh2 Algorithm Compatibility**: Exact algorithm priorities matching ssh2 library
+- **Zero Manual Crypto**: No custom cryptographic implementations - pure Node.js crypto
 
 ## ⚡ Performance
 

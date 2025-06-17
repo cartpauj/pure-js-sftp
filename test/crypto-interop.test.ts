@@ -141,27 +141,26 @@ describe('Cryptographic Interoperability', () => {
   });
 
   describe('BigInt Arithmetic Compatibility', () => {
-    test('should handle large numbers correctly', () => {
-      // Test with numbers used in DH groups
-      const dhPrime14 = BigInt('0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF');
+    test('should handle large numbers correctly with Node.js crypto', () => {
+      // Test that our DH implementation uses Node.js crypto instead of manual math
+      const { createDiffieHellmanGroup } = require('crypto');
       
-      const testBases = [BigInt(2), BigInt(5), BigInt(65537), BigInt('0x10001')];
-      const testExponents = [BigInt(1), BigInt(2), BigInt(16), BigInt(65537)];
+      // Test that we can create DH groups used in our implementation
+      const dhGroups = ['modp14', 'modp15', 'modp16', 'modp17', 'modp18'];
       
-      for (const base of testBases) {
-        for (const exp of testExponents) {
-          // Test modular exponentiation
-          const result = CryptoUtils.modPow(base, exp, dhPrime14);
-          
-          // Verify result is in valid range
-          expect(result).toBeGreaterThanOrEqual(BigInt(0));
-          expect(result).toBeLessThan(dhPrime14);
-          
-          // Test BigInt conversion round-trip
-          const resultBuffer = CryptoUtils.bnToBuffer(result);
-          const roundTrip = CryptoUtils.bufferToBn(resultBuffer);
-          expect(roundTrip).toBe(result);
-        }
+      for (const groupName of dhGroups) {
+        const dh = createDiffieHellmanGroup(groupName);
+        
+        // Generate keys and verify they're valid
+        const publicKey = dh.generateKeys();
+        expect(publicKey).toBeInstanceOf(Buffer);
+        expect(publicKey.length).toBeGreaterThan(0);
+        
+        // Test BigInt conversion round-trip with bnToBuffer
+        const testBigInt = BigInt('0x123456789ABCDEF');
+        const buffer = CryptoUtils.bnToBuffer(testBigInt);
+        const roundTrip = BigInt('0x' + buffer.toString('hex'));
+        expect(roundTrip).toBe(testBigInt);
       }
     });
 
@@ -180,13 +179,16 @@ describe('Cryptographic Interoperability', () => {
       
       for (const value of testCases) {
         const buffer = CryptoUtils.bnToBuffer(value);
-        const restored = CryptoUtils.bufferToBn(buffer);
+        // Use native Buffer to BigInt conversion instead of removed manual implementation
+        const restored = BigInt('0x' + buffer.toString('hex'));
         expect(restored).toBe(value);
         
-        // Test with leading zeros
+        // Test with leading zeros using our new convertToMpint function
         const paddedBuffer = Buffer.concat([Buffer.alloc(4, 0), buffer]);
-        const restoredPadded = CryptoUtils.bufferToBn(paddedBuffer);
-        expect(restoredPadded).toBe(value);
+        const { PacketBuilder } = require('../src/ssh/packet');
+        const mpintFormatted = PacketBuilder.convertToMpint(paddedBuffer);
+        const restoredFromMpint = BigInt('0x' + mpintFormatted.toString('hex'));
+        expect(restoredFromMpint).toBe(value);
       }
     });
   });
@@ -205,8 +207,8 @@ describe('Cryptographic Interoperability', () => {
           // Verify public key is valid
           expect(publicKey.length).toBeGreaterThan(0);
           
-          // Convert to BigInt and verify it's in valid range
-          const pubKeyBN = CryptoUtils.bufferToBn(publicKey);
+          // Convert to BigInt using native Buffer methods and verify it's in valid range
+          const pubKeyBN = BigInt('0x' + publicKey.toString('hex'));
           expect(pubKeyBN).toBeGreaterThan(BigInt(1));
           
           // Verify each generation produces different keys

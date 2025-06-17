@@ -292,3 +292,68 @@ describe('PacketReader', () => {
     expect(() => reader.readString()).toThrow('Insufficient data');
   });
 });
+
+describe('SSH mpint conversion (ssh2 compatibility)', () => {
+  test('should strip leading zeros before MSB check', () => {
+    // Buffer with leading zeros and MSB not set
+    const input = Buffer.from([0x00, 0x00, 0x7F, 0xFF]);
+    const result = PacketBuilder.convertToMpint(input);
+    
+    // Should strip leading zeros, MSB is 0 (0x7F), no padding needed
+    expect(result).toEqual(Buffer.from([0x7F, 0xFF]));
+  });
+
+  test('should add zero byte when MSB is set after stripping zeros', () => {
+    // Buffer with leading zeros and MSB set
+    const input = Buffer.from([0x00, 0x00, 0xFF, 0xFF]);
+    const result = PacketBuilder.convertToMpint(input);
+    
+    // Should strip leading zeros, MSB is 1 (0xFF), add zero padding
+    expect(result).toEqual(Buffer.from([0x00, 0xFF, 0xFF]));
+  });
+
+  test('should handle all zero bytes', () => {
+    const input = Buffer.from([0x00, 0x00, 0x00]);
+    const result = PacketBuilder.convertToMpint(input);
+    
+    // Should return single zero byte
+    expect(result).toEqual(Buffer.from([0x00]));
+  });
+
+  test('should handle empty buffer', () => {
+    const input = Buffer.alloc(0);
+    const result = PacketBuilder.convertToMpint(input);
+    
+    // Should return empty buffer
+    expect(result).toEqual(Buffer.alloc(0));
+  });
+
+  test('should not modify buffer when no leading zeros and MSB not set', () => {
+    const input = Buffer.from([0x7F, 0xFF, 0x00]);
+    const result = PacketBuilder.convertToMpint(input);
+    
+    // Should return same buffer
+    expect(result).toEqual(input);
+  });
+
+  test('should handle single byte with MSB set', () => {
+    const input = Buffer.from([0xFF]);
+    const result = PacketBuilder.convertToMpint(input);
+    
+    // Should add zero padding
+    expect(result).toEqual(Buffer.from([0x00, 0xFF]));
+  });
+
+  test('should build proper SSH mpint with length prefix', () => {
+    const input = Buffer.from([0xFF, 0xFF]);
+    const result = PacketBuilder.buildMpint(input);
+    
+    // Should be: [length(4)] + [0x00, 0xFF, 0xFF]
+    const expected = Buffer.concat([
+      Buffer.from([0x00, 0x00, 0x00, 0x03]), // Length: 3
+      Buffer.from([0x00, 0xFF, 0xFF])        // Zero-padded mpint
+    ]);
+    
+    expect(result).toEqual(expected);
+  });
+});

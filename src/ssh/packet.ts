@@ -4,6 +4,7 @@
 
 import { SSHPacket, SFTPPacket } from './types';
 import { SSH_MSG, SFTP_MSG } from './constants';
+import { randomBytes } from 'crypto';
 
 export class PacketParser {
   private buffer: Buffer = Buffer.alloc(0);
@@ -142,15 +143,21 @@ export class PacketBuilder {
    * Build SSH packet
    */
   static buildSSHPacket(type: SSH_MSG, payload: Buffer = Buffer.alloc(0)): Buffer {
-    // Calculate padding
-    const blockSize = 8; // Minimum block size before encryption
-    const paddingLength = blockSize - ((payload.length + 6) % blockSize);
-    const padding = Buffer.alloc(paddingLength);
-    
-    // Fill padding with random data
-    for (let i = 0; i < paddingLength; i++) {
-      padding[i] = Math.floor(Math.random() * 256);
+    // Calculate padding according to RFC 4253
+    const blockSize = 8;
+    const minPadding = 4; // Minimum padding required
+
+    // Calculate total size without padding: padding_length(1) + message_type(1) + payload
+    const sizeWithoutPadding = 1 + 1 + payload.length;
+
+    // Calculate padding needed to make total size a multiple of blockSize, with minimum of 4 bytes
+    let paddingLength = minPadding;
+    while ((sizeWithoutPadding + paddingLength) % blockSize !== 0) {
+        paddingLength++;
     }
+    
+    // Use cryptographically secure random padding (following ssh2's approach)
+    const padding = randomBytes(paddingLength);
     
     // Build packet: [packet_length][padding_length][message_type][payload][padding]
     const packetLength = 1 + 1 + payload.length + paddingLength; // padding_length + message_type + payload + padding
@@ -245,6 +252,62 @@ export class PacketBuilder {
     result.writeUInt32BE(value, 0);
     return result;
   }
+
+  /**
+   * Convert to SSH mpint format (following ssh2's convertToMpint logic exactly)
+   */
+  static convertToMpint(key: Buffer): Buffer {
+    // Handle empty buffer
+    if (key.length === 0) {
+      return Buffer.alloc(0);
+    }
+    
+    let newKey: Buffer;
+    let idx = 0;
+    let len = key.length;
+    
+    // Strip leading zeros (ssh2's approach)
+    while (idx < key.length && key[idx] === 0x00) {
+      ++idx;
+      --len;
+    }
+
+    // If all bytes were zero, return a single zero byte
+    if (len === 0) {
+      return Buffer.from([0]);
+    }
+
+    // If MSB is set, prepend zero byte to ensure positive integer
+    if (key[idx] & 0x80) {
+      newKey = Buffer.allocUnsafe(1 + len);
+      newKey[0] = 0;
+      key.copy(newKey, 1, idx);
+      return newKey;
+    }
+
+    // If we stripped zeros, create new buffer
+    if (len !== key.length) {
+      newKey = Buffer.allocUnsafe(len);
+      key.copy(newKey, 0, idx);
+      key = newKey;
+    }
+    
+    return key;
+  }
+
+  /**
+   * Build SSH mpint format for big integers (needed for DH key exchange)
+   */
+  static buildMpint(data: Buffer): Buffer {
+    // First convert to proper mpint format following ssh2's logic
+    const mpintData = PacketBuilder.convertToMpint(data);
+
+    // Return length-prefixed mpint
+    const result = Buffer.alloc(4 + mpintData.length);
+    result.writeUInt32BE(mpintData.length, 0);
+    mpintData.copy(result, 4);
+    return result;
+  }
 }
 
 export class PacketReader {
@@ -337,6 +400,18 @@ export class PacketReader {
     this.offset += 1;
     
     return value;
+  }
+
+  /**
+   * Read raw bytes from packet (fixed length, for KEXINIT cookie)
+   */
+  readRawBytes(length: number): Buffer {
+    if (this.offset + length > this.buffer.length) {
+      throw new Error('Insufficient data to read raw bytes');
+    }
+    const data = this.buffer.subarray(this.offset, this.offset + length);
+    this.offset += length;
+    return data;
   }
 
   /**

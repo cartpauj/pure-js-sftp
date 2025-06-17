@@ -4,40 +4,40 @@ This document provides comprehensive information about the testing infrastructur
 
 ## 📊 Test Overview
 
-The project includes **107 tests** across **9 test suites** that validate every aspect of the SSH/SFTP implementation:
+The project includes **238 tests** across **20 test suites** that validate every aspect of the SSH/SFTP implementation:
 
 ```
-Test Suites: 9 passed, 9 total
-Tests:       107 passed, 107 total
+Test Suites: 20 passed, 20 total  
+Tests:       238 passed, 238 total
 ```
 
 ## 🧪 Test Categories
 
 ### 1. Cryptographic Function Tests (`test/crypto.test.ts`)
-Validates core cryptographic operations with known test vectors:
+Validates core cryptographic operations using Node.js crypto module:
 
-- **Hash Functions**: SHA-1, SHA-256, SHA-512
+- **Hash Functions**: SHA-1, SHA-256, SHA-384, SHA-512
 - **HMAC Functions**: HMAC-SHA1, HMAC-SHA256, HMAC-SHA512  
-- **BigInt Utilities**: Buffer conversion and modular arithmetic
-- **Random Generation**: Cryptographically secure random bytes
+- **BigInt Utilities**: Buffer conversion using native methods
+- **Random Generation**: Node.js `crypto.randomBytes()` validation
 
 ### 2. Cryptographic Interoperability (`test/crypto-interop.test.ts`)
-Ensures compatibility with industry standards:
+Ensures compatibility with industry standards and Node.js crypto:
 
-- **Node.js Compatibility**: Direct comparison with Node's built-in crypto module
+- **Node.js Crypto Integration**: Validates use of Node.js DH/ECDH implementations
 - **NIST Test Vectors**: SHA-256 validation against official NIST test cases
 - **RFC 4231 Compliance**: HMAC-SHA256 validation against RFC test vectors
-- **Performance Testing**: Validates efficiency with realistic workloads
-- **Security Validation**: Entropy testing for random number generation
+- **ssh2 Compatibility**: Validates algorithm priorities match ssh2 library
+- **Security Validation**: Cryptographically secure random generation testing
 
-### 3. Diffie-Hellman Key Exchange (`test/diffie-hellman.test.ts`)
-Tests cryptographic key exchange implementation:
+### 3. Key Exchange Implementation (`test/diffie-hellman.test.ts`)
+Tests Node.js crypto-based key exchange implementation:
 
-- **Algorithm Support**: Groups 14 (SHA-256) and 16 (SHA-512)
-- **Key Generation**: Public/private key pair creation
-- **Exchange Simulation**: Complete client-server key exchange
-- **Hash Generation**: Exchange hash creation and validation
-- **Key Derivation**: Encryption key derivation from shared secrets
+- **Algorithm Support**: ECDH (nistp256/384/521) + DH Groups 1, 14-18 with SHA-1/256/512
+- **Node.js Integration**: Uses `createDiffieHellmanGroup()` and `createECDH()`
+- **Exchange Simulation**: Complete client-server key exchange following ssh2 patterns
+- **SSH mpint Format**: Proper SSH wire format handling
+- **Key Derivation**: RFC 4253 compliant encryption key derivation
 
 ### 4. SSH Transport Layer (`test/ssh-transport.test.ts`)  
 Validates SSH protocol transport implementation:

@@ -130,7 +130,15 @@ export class AuthManager extends EventEmitter {
    */
   private parsePrivateKey(privateKey: Buffer | string, passphrase?: string): { publicKey: Buffer; algorithm: string } {
     try {
+      if (!privateKey) {
+        throw new Error('Private key is required');
+      }
+
       const keyStr = privateKey instanceof Buffer ? privateKey.toString() : privateKey;
+      
+      if (!keyStr || (typeof keyStr === 'string' && keyStr.trim() === '')) {
+        throw new Error('Private key is empty');
+      }
       
       // Check if the key is encrypted and needs a passphrase
       const isEncrypted = keyStr.includes('ENCRYPTED');
@@ -142,22 +150,35 @@ export class AuthManager extends EventEmitter {
       // Use Node.js built-in crypto to parse the key
       // For encrypted keys, we need to use createPrivateKey first, then extract public key
       let keyObj;
-      if (isEncrypted) {
-        const privateKeyObj = createPrivateKey({
-          key: keyStr,
-          format: 'pem',
-          passphrase: passphrase
-        });
-        keyObj = createPublicKey(privateKeyObj);
-      } else {
-        keyObj = createPublicKey({
-          key: keyStr,
-          format: 'pem'
-        });
+      try {
+        if (isEncrypted) {
+          const privateKeyObj = createPrivateKey({
+            key: keyStr,
+            format: 'pem',
+            passphrase: passphrase
+          });
+          keyObj = createPublicKey(privateKeyObj);
+        } else {
+          // Try as PEM first, then as OpenSSH format
+          try {
+            keyObj = createPublicKey({
+              key: keyStr,
+              format: 'pem'
+            });
+          } catch (pemError) {
+            // If PEM fails, try as private key (which can handle OpenSSH format)
+            const privateKeyObj = createPrivateKey({
+              key: keyStr,
+              format: 'pem'
+            });
+            keyObj = createPublicKey(privateKeyObj);
+          }
+        }
+      } catch (keyError: any) {
+        throw new Error(`Unable to parse key: ${keyError?.message || keyError}`);
       }
       
       // Export public key in SSH format
-      const keyDetails = keyObj.asymmetricKeyDetails;
       const keyType = keyObj.asymmetricKeyType;
       
       if (keyType === 'rsa') {
@@ -182,18 +203,29 @@ export class AuthManager extends EventEmitter {
     // According to RFC 8332, the public key blob still uses "ssh-rsa" format
     // but the signature algorithm can be rsa-sha2-256 or rsa-sha2-512
     const keyBlobAlgorithm = 'ssh-rsa';
-    // Prefer stronger signature algorithm (will be used for signing)
-    const signatureAlgorithm = 'rsa-sha2-256';
+    
+    // Determine signature algorithm based on key size
+    const keyDetails = keyObj.asymmetricKeyDetails;
+    let signatureAlgorithm = 'rsa-sha2-256'; // Default to SHA-256
+    
+    if (keyDetails && keyDetails.modulusLength) {
+      // Check the key size to determine best signature algorithm
+      const modulusBits = keyDetails.modulusLength;
+      if (modulusBits >= 4096) {
+        signatureAlgorithm = 'rsa-sha2-512';
+      }
+    }
     
     try {
-      // Export the key in DER format to extract RSA components
-      const publicKeyDer = keyObj.export({ format: 'der', type: 'spki' });
-      
       // Parse RSA components using Node.js crypto.KeyObject asymmetricKeyDetails
-      const keyDetails = keyObj.asymmetricKeyDetails;
+      // Note: In newer Node.js versions, modulus isn't directly available in asymmetricKeyDetails
+      if (!keyDetails || !keyDetails.publicExponent) {
+        throw new Error('Unable to extract RSA key components from asymmetricKeyDetails');
+      }
       
-      if (!keyDetails || !keyDetails.modulus || !keyDetails.publicExponent) {
-        throw new Error('Unable to extract RSA key components');
+      // Try to get modulus from asymmetricKeyDetails first (older Node.js versions)
+      if (!keyDetails.modulus) {
+        throw new Error('Modulus not available in asymmetricKeyDetails, will try JWK fallback');
       }
       
       // Convert bigint to Buffer for SSH wire format
@@ -361,12 +393,12 @@ export class AuthManager extends EventEmitter {
     ]);
 
     // Generate actual signature using private key
-    const signature = this.signData(signatureData, algorithm);
+    const rawSignature = this.signData(signatureData, algorithm);
 
     // Build SSH signature blob
     const signatureBlob = Buffer.concat([
       PacketBuilder.buildString(algorithm),
-      PacketBuilder.buildBytes(signature)
+      PacketBuilder.buildBytes(rawSignature)
     ]);
 
     const payload = Buffer.concat([
@@ -409,33 +441,37 @@ export class AuthManager extends EventEmitter {
     }
 
     try {
-      // Parse the key to determine actual key type
-      const keyObj = createPublicKey({
-        key: keyStr,
-        format: 'pem'
-      });
+      const isEncrypted = keyStr.includes('ENCRYPTED');
       
-      const actualKeyType = keyObj.asymmetricKeyType;
-      let signAlgorithm: string;
+      // Create private key object for signing
+      let privateKeyObj;
+      try {
+        privateKeyObj = createPrivateKey({
+          key: keyStr,
+          format: 'pem',
+          passphrase: isEncrypted ? this.config.passphrase : undefined
+        });
+      } catch (keyError: any) {
+        throw new Error(`Unable to parse private key for signing: ${keyError?.message || keyError}`);
+      }
+      
+      // Get key information 
+      const publicKeyObj = createPublicKey(privateKeyObj);
+      const actualKeyType = publicKeyObj.asymmetricKeyType;
+      let signAlgorithm: string | null;
       
       // Match signing algorithm to actual key type and requested algorithm
-      if (algorithm === 'ssh-rsa' && actualKeyType === 'rsa') {
-        // Use SHA-256 for RSA instead of deprecated SHA-1
-        signAlgorithm = 'RSA-SHA256';
-      } else if (algorithm === 'rsa-sha2-256' && actualKeyType === 'rsa') {
+      if ((algorithm === 'ssh-rsa' || algorithm === 'rsa-sha2-256') && actualKeyType === 'rsa') {
         signAlgorithm = 'RSA-SHA256';
       } else if (algorithm === 'rsa-sha2-512' && actualKeyType === 'rsa') {
         signAlgorithm = 'RSA-SHA512';
       } else if (algorithm.startsWith('ecdsa-sha2-') && actualKeyType === 'ec') {
-        const curve = keyObj.asymmetricKeyDetails?.namedCurve;
+        const curve = publicKeyObj.asymmetricKeyDetails?.namedCurve;
         if (algorithm === 'ecdsa-sha2-nistp256' && curve === 'prime256v1') {
-          // ECDSA with P-256 uses SHA-256
           signAlgorithm = 'sha256';
         } else if (algorithm === 'ecdsa-sha2-nistp384' && curve === 'secp384r1') {
-          // ECDSA with P-384 uses SHA-384
           signAlgorithm = 'sha384';
         } else if (algorithm === 'ecdsa-sha2-nistp521' && curve === 'secp521r1') {
-          // ECDSA with P-521 uses SHA-512
           signAlgorithm = 'sha512';
         } else {
           throw new Error(`Key curve ${curve} does not match algorithm ${algorithm}`);
@@ -443,38 +479,24 @@ export class AuthManager extends EventEmitter {
       } else if (algorithm === 'ssh-ed25519' && actualKeyType === 'ed25519') {
         // For Ed25519, Node.js uses null as the algorithm
         // Ed25519 has built-in hashing (PureEdDSA mode)
-        signAlgorithm = null as any;
+        signAlgorithm = null;
       } else {
         throw new Error(`Key type ${actualKeyType} does not match algorithm ${algorithm}`);
       }
 
-      // Check if key is encrypted and get passphrase
-      const isEncrypted = keyStr.includes('ENCRYPTED');
-      const passphrase = isEncrypted ? this.config.passphrase : undefined;
-      
-      if (isEncrypted && !passphrase) {
-        throw new Error('Private key is encrypted but no passphrase provided for signing');
-      }
-
+      // Generate the raw signature
+      let rawSignature: Buffer;
       if (signAlgorithm === null) {
-        // For Ed25519, use the sign method directly on the key
-        const privateKey = createPrivateKey({
-          key: keyStr,
-          format: 'pem',
-          passphrase: passphrase
-        });
-        
-        return sign(null, data, privateKey);
+        // For Ed25519, use the sign method directly
+        rawSignature = sign(null, data, privateKeyObj);
       } else {
         const signer = createSign(signAlgorithm);
         signer.update(data);
-        
-        return signer.sign({
-          key: keyStr,
-          format: 'pem',
-          passphrase: passphrase
-        });
+        rawSignature = signer.sign(privateKeyObj);
       }
+      
+      // Return raw signature - the caller will wrap it in SSH format
+      return rawSignature;
       
     } catch (error: any) {
       throw new Error(`Failed to sign data: ${error?.message || error}`);
@@ -495,9 +517,8 @@ export class AuthManager extends EventEmitter {
     
     const bytes = Buffer.from(hex, 'hex');
     
-    // SSH mpint format: if the most significant bit is set, prepend 0x00
-    const needsPadding = bytes.length > 0 && (bytes[0] & 0x80) !== 0;
-    const mpintBytes = needsPadding ? Buffer.concat([Buffer.from([0x00]), bytes]) : bytes;
+    // Use centralized ssh2-compatible mpint conversion
+    const mpintBytes = PacketBuilder.convertToMpint(bytes);
     
     // Return length-prefixed mpint
     return PacketBuilder.buildBytes(mpintBytes);
@@ -517,9 +538,8 @@ export class AuthManager extends EventEmitter {
     
     const bytes = Buffer.from(base64, 'base64');
     
-    // SSH mpint format: if the most significant bit is set, prepend 0x00
-    const needsPadding = bytes.length > 0 && (bytes[0] & 0x80) !== 0;
-    const mpintBytes = needsPadding ? Buffer.concat([Buffer.from([0x00]), bytes]) : bytes;
+    // Use centralized ssh2-compatible mpint conversion
+    const mpintBytes = PacketBuilder.convertToMpint(bytes);
     
     // Return length-prefixed mpint
     return PacketBuilder.buildBytes(mpintBytes);

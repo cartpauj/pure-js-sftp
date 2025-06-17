@@ -1,87 +1,72 @@
 /**
- * Diffie-Hellman Key Exchange Implementation
- * Following ssh2's approach using Node.js crypto groups
+ * ECDH Key Exchange Implementation
+ * Following ssh2 library's approach exactly
  */
 
-import { createDiffieHellmanGroup, DiffieHellmanGroup } from 'crypto';
+import { createECDH, ECDH } from 'crypto';
 import { CryptoUtils } from '../crypto/utils';
 import { PacketBuilder, PacketReader } from '../ssh/packet';
 
-// DH group mappings following ssh2's approach
-// Maps SSH algorithm names to Node.js crypto group names and hash algorithms
-const DH_GROUPS = {
-  'diffie-hellman-group1-sha1': {
-    groupName: 'modp2',  // 1024-bit (RFC 2409)
-    hashAlgorithm: 'sha1'
-  },
-  'diffie-hellman-group14-sha1': {
-    groupName: 'modp14', // 2048-bit (RFC 3526)
-    hashAlgorithm: 'sha1'
-  },
-  'diffie-hellman-group14-sha256': {
-    groupName: 'modp14', // 2048-bit (RFC 3526)
+// ECDH curve mappings (following ssh2's approach)
+const ECDH_CURVES = {
+  'ecdh-sha2-nistp256': {
+    curveName: 'prime256v1',
     hashAlgorithm: 'sha256'
   },
-  'diffie-hellman-group15-sha512': {
-    groupName: 'modp15', // 3072-bit (RFC 3526)
-    hashAlgorithm: 'sha512'
+  'ecdh-sha2-nistp384': {
+    curveName: 'secp384r1', 
+    hashAlgorithm: 'sha384'
   },
-  'diffie-hellman-group16-sha512': {
-    groupName: 'modp16', // 4096-bit (RFC 3526)
-    hashAlgorithm: 'sha512'
-  },
-  'diffie-hellman-group17-sha512': {
-    groupName: 'modp17', // 6144-bit (RFC 3526)
-    hashAlgorithm: 'sha512'
-  },
-  'diffie-hellman-group18-sha512': {
-    groupName: 'modp18', // 8192-bit (RFC 3526)
+  'ecdh-sha2-nistp521': {
+    curveName: 'secp521r1',
     hashAlgorithm: 'sha512'
   }
 } as const;
 
-export class DiffieHellmanKex {
+export class ECDHKeyExchange {
   private kexAlgorithm: string;
-  private dhGroup: typeof DH_GROUPS[keyof typeof DH_GROUPS];
-  private dh: DiffieHellmanGroup;
-  private publicKey: Buffer;
+  private curveName: string;
+  private hashAlgorithm: string;
+  private ecdh: ECDH;
+  private clientPublicKey: Buffer;
   private sharedSecret: Buffer | null = null;
 
   constructor(kexAlgorithm: string) {
     this.kexAlgorithm = kexAlgorithm;
     
-    if (!(kexAlgorithm in DH_GROUPS)) {
-      throw new Error(`Unsupported KEX algorithm: ${kexAlgorithm}`);
+    if (!(kexAlgorithm in ECDH_CURVES)) {
+      throw new Error(`Unsupported ECDH algorithm: ${kexAlgorithm}`);
     }
     
-    this.dhGroup = DH_GROUPS[kexAlgorithm as keyof typeof DH_GROUPS];
+    const curveInfo = ECDH_CURVES[kexAlgorithm as keyof typeof ECDH_CURVES];
+    this.curveName = curveInfo.curveName;
+    this.hashAlgorithm = curveInfo.hashAlgorithm;
     
-    // Create DH group using Node.js crypto (following ssh2's approach)
-    this.dh = createDiffieHellmanGroup(this.dhGroup.groupName);
-    
-    // Generate keys
-    this.publicKey = this.dh.generateKeys();
+    // Create ECDH instance and generate keys (following ssh2's approach)
+    this.ecdh = createECDH(this.curveName);
+    this.clientPublicKey = this.ecdh.generateKeys();
   }
 
   /**
-   * Get client's public key for KEXDH_INIT
+   * Get client's public key for KEXECDH_INIT
    */
   getClientPublicKey(): Buffer {
-    return this.publicKey;
+    return this.clientPublicKey;
   }
 
   /**
-   * Create KEXDH_INIT packet
+   * Create KEXECDH_INIT packet payload
+   * For ECDH, the payload is just the public key as SSH string (length-prefixed)
    */
-  createKexdhInit(): Buffer {
-    const publicKeyBuffer = this.getClientPublicKey();
-    return PacketBuilder.buildMpint(publicKeyBuffer);
+  createKexecdhInit(): Buffer {
+    // ECDH public key is sent as SSH string (length-prefixed bytes, not base64)
+    return PacketBuilder.buildBytes(this.clientPublicKey);
   }
 
   /**
-   * Process KEXDH_REPLY from server
+   * Process KEXECDH_REPLY from server
    */
-  processKexdhReply(payload: Buffer): {
+  processKexecdhReply(payload: Buffer): {
     serverHostKey: Buffer;
     serverPublicKey: Buffer;
     signature: Buffer;
@@ -93,25 +78,25 @@ export class DiffieHellmanKex {
       // Read server host key
       const serverHostKey = reader.readBytes();
       
-      // Read server's public key
-      const serverPublicKeyBuffer = reader.readBytes();
+      // Read server's ECDH public key
+      const serverPublicKey = reader.readBytes();
       
       // Read signature
       const signature = reader.readBytes();
       
-      // Compute shared secret using Node.js DH (following ssh2's approach)
-      const rawSecret = this.dh.computeSecret(serverPublicKeyBuffer);
+      // Compute shared secret using ECDH
+      const rawSecret = this.ecdh.computeSecret(serverPublicKey);
       // Convert to proper SSH mpint format like ssh2 does
       this.sharedSecret = PacketBuilder.convertToMpint(rawSecret);
       
       return {
         serverHostKey,
-        serverPublicKey: serverPublicKeyBuffer,
+        serverPublicKey,
         signature,
         sharedSecret: this.sharedSecret
       };
     } catch (error: any) {
-      throw new Error(`Failed to process KEXDH_REPLY: ${error?.message || error}`);
+      throw new Error(`Failed to process KEXECDH_REPLY: ${error?.message || error}`);
     }
   }
 
@@ -128,7 +113,7 @@ export class DiffieHellmanKex {
     serverPublicKey: Buffer,
     sharedSecret: Buffer
   ): Buffer {
-    // Convert public keys to mpint format like ssh2 does
+    // Convert public keys to mpint format like ssh2 does for both DH and ECDH
     const clientPublicKeyMpint = PacketBuilder.convertToMpint(clientPublicKey);
     const serverPublicKeyMpint = PacketBuilder.convertToMpint(serverPublicKey);
     const sharedSecretMpint = PacketBuilder.convertToMpint(sharedSecret);
@@ -145,16 +130,15 @@ export class DiffieHellmanKex {
       PacketBuilder.buildBytes(sharedSecretMpint)
     ]);
 
-    // Hash using the algorithm specified for this KEX method
-    const hashAlg = this.dhGroup.hashAlgorithm;
-    if (hashAlg === 'sha1') {
-      return CryptoUtils.sha1(hashInput);
-    } else if (hashAlg === 'sha256') {
+    // Hash using the algorithm specified for this ECDH method
+    if (this.hashAlgorithm === 'sha256') {
       return CryptoUtils.sha256(hashInput);
-    } else if (hashAlg === 'sha512') {
+    } else if (this.hashAlgorithm === 'sha384') {
+      return CryptoUtils.sha384(hashInput);
+    } else if (this.hashAlgorithm === 'sha512') {
       return CryptoUtils.sha512(hashInput);
     } else {
-      throw new Error(`Unsupported hash algorithm: ${hashAlg}`);
+      throw new Error(`Unsupported hash algorithm: ${this.hashAlgorithm}`);
     }
   }
 
@@ -179,9 +163,8 @@ export class DiffieHellmanKex {
     
     // Key derivation function as per RFC 4253
     const deriveKey = (char: string, length: number): Buffer => {
-      const hashAlg = this.dhGroup.hashAlgorithm;
-      const hashFunc = hashAlg === 'sha1' ? CryptoUtils.sha1 :
-                      hashAlg === 'sha256' ? CryptoUtils.sha256 : CryptoUtils.sha512;
+      const hashFunc = this.hashAlgorithm === 'sha256' ? CryptoUtils.sha256 :
+                      this.hashAlgorithm === 'sha384' ? CryptoUtils.sha384 : CryptoUtils.sha512;
       
       let key = hashFunc(Buffer.concat([
         PacketBuilder.buildMpint(sharedSecret),

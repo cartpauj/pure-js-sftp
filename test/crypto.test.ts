@@ -99,79 +99,31 @@ describe('CryptoUtils', () => {
       expect(buffer.toString('hex')).toBe('1234567890abcdef');
     });
 
-    test('should convert buffer to bigint correctly', () => {
+    // Note: Removed bufferToBn tests as this manual implementation was removed
+    // All BigInt conversions now use Node.js built-in Buffer methods for security
+    test('should handle buffer to BigInt conversion via native methods', () => {
       const buffer = Buffer.from('1234567890abcdef', 'hex');
-      const bn = CryptoUtils.bufferToBn(buffer);
+      const bn = BigInt('0x' + buffer.toString('hex'));
       
       expect(typeof bn).toBe('bigint');
       expect(bn).toBe(BigInt('0x1234567890abcdef'));
     });
 
-    test('should round-trip bigint <-> buffer conversion', () => {
-      const original = BigInt('0x123456789abcdef0123456789abcdef');
-      const buffer = CryptoUtils.bnToBuffer(original);
-      const restored = CryptoUtils.bufferToBn(buffer);
-      
-      expect(restored).toBe(original);
-    });
-
     test('should handle small numbers correctly', () => {
       const small = BigInt(42);
       const buffer = CryptoUtils.bnToBuffer(small);
-      const restored = CryptoUtils.bufferToBn(buffer);
       
-      expect(restored).toBe(small);
       expect(buffer.toString('hex')).toBe('2a');
     });
 
     test('should handle zero correctly', () => {
       const zero = BigInt(0);
       const buffer = CryptoUtils.bnToBuffer(zero);
-      const restored = CryptoUtils.bufferToBn(buffer);
       
-      expect(restored).toBe(zero);
       expect(buffer.toString('hex')).toBe('00');
     });
   });
 
-  describe('modPow function', () => {
-    test('should compute modular exponentiation correctly', () => {
-      // Test: 3^4 mod 5 = 81 mod 5 = 1
-      const result = CryptoUtils.modPow(BigInt(3), BigInt(4), BigInt(5));
-      expect(result).toBe(BigInt(1));
-    });
-
-    test('should handle large numbers', () => {
-      // Test a larger case
-      const base = BigInt('123456789');
-      const exponent = BigInt('987654321');
-      const modulus = BigInt('1000000007');
-      
-      const result = CryptoUtils.modPow(base, exponent, modulus);
-      expect(result).toBeGreaterThanOrEqual(BigInt(0));
-      expect(result).toBeLessThan(modulus);
-    });
-
-    test('should handle edge cases', () => {
-      // Test: anything^0 mod m = 1 (if m > 1)
-      expect(CryptoUtils.modPow(BigInt(123), BigInt(0), BigInt(456))).toBe(BigInt(1));
-      
-      // Test: 0^anything mod m = 0 (if exponent > 0)
-      expect(CryptoUtils.modPow(BigInt(0), BigInt(5), BigInt(7))).toBe(BigInt(0));
-      
-      // Test: modulus = 1 should return 0
-      expect(CryptoUtils.modPow(BigInt(5), BigInt(3), BigInt(1))).toBe(BigInt(0));
-    });
-
-    test('should be consistent with JavaScript ** operator for small numbers', () => {
-      const base = 7;
-      const exponent = 3;
-      const modulus = 13;
-      
-      const expected = BigInt((base ** exponent) % modulus);
-      const actual = CryptoUtils.modPow(BigInt(base), BigInt(exponent), BigInt(modulus));
-      
-      expect(actual).toBe(expected);
-    });
-  });
+  // Note: Removed modPow tests as this manual implementation was removed for security
+  // All modular exponentiation is now handled by Node.js crypto module in DH/ECDH operations
 });

@@ -20,10 +20,13 @@ export enum SSH_MSG {
   NEWKEYS = 21,
   KEXDH_INIT = 30,
   KEXDH_REPLY = 31,
+  KEXECDH_INIT = 30,    // Same as KEXDH_INIT 
+  KEXECDH_REPLY = 31,   // Same as KEXDH_REPLY
   USERAUTH_REQUEST = 50,
   USERAUTH_FAILURE = 51,
   USERAUTH_SUCCESS = 52,
   USERAUTH_BANNER = 53,
+  USERAUTH_PK_OK = 60,
   GLOBAL_REQUEST = 80,
   REQUEST_SUCCESS = 81,
   REQUEST_FAILURE = 82,
@@ -60,39 +63,84 @@ export enum SSH_DISCONNECT {
 }
 
 // Key Exchange Algorithms
+// Matching ssh2's DEFAULT_KEX exactly for maximum compatibility
 export const KEX_ALGORITHMS = [
+  // Curve25519 (highest priority in ssh2 when supported)
+  // Note: We'll implement these later, for now focusing on ECDH + DH
+  // 'curve25519-sha256@libssh.org',
+  // 'curve25519-sha256',
+
+  // ECDH algorithms (ssh2's default priorities)
+  'ecdh-sha2-nistp256',
+  'ecdh-sha2-nistp384',
+  'ecdh-sha2-nistp521',
+
+  // DH group exchange
+  'diffie-hellman-group-exchange-sha256',
+
+  // Fixed DH groups (modern) - matching ssh2's DEFAULT_KEX order
   'diffie-hellman-group14-sha256',
+  'diffie-hellman-group15-sha512', 
   'diffie-hellman-group16-sha512',
+  'diffie-hellman-group17-sha512',
   'diffie-hellman-group18-sha512',
+
+  // Legacy support (from ssh2's SUPPORTED_KEX)
+  'diffie-hellman-group-exchange-sha1',
+  'diffie-hellman-group14-sha1',
+  'diffie-hellman-group1-sha1',
 ] as const;
 
 // Server Host Key Algorithms
+// Matching ssh2's DEFAULT_SERVER_HOST_KEY exactly
 export const HOST_KEY_ALGORITHMS = [
+  // Note: ssh-ed25519 would be first in ssh2 if eddsaSupported
+  // 'ssh-ed25519',
+  'ecdsa-sha2-nistp256',
+  'ecdsa-sha2-nistp384', 
+  'ecdsa-sha2-nistp521',
   'rsa-sha2-512',
   'rsa-sha2-256',
   'ssh-rsa',
 ] as const;
 
-// Encryption Algorithms
+// Encryption Algorithms  
+// Matching ssh2's DEFAULT_CIPHER exactly
 export const ENCRYPTION_ALGORITHMS = [
-  'aes128-ctr',
-  'aes192-ctr', 
-  'aes256-ctr',
+  // GCM ciphers first (ssh2's priority)
   'aes128-gcm@openssh.com',
   'aes256-gcm@openssh.com',
+  
+  // CTR ciphers
+  'aes128-ctr',
+  'aes192-ctr',
+  'aes256-ctr',
+  
+  // Note: ssh2 adds chacha20-poly1305@openssh.com based on CPU support
+  // We'll add it as basic support
+  'chacha20-poly1305@openssh.com',
 ] as const;
 
 // MAC Algorithms
+// Matching ssh2's DEFAULT_MAC exactly
 export const MAC_ALGORITHMS = [
+  // ETM (Encrypt-then-MAC) variants first (ssh2's priority)
+  'hmac-sha2-256-etm@openssh.com',
+  'hmac-sha2-512-etm@openssh.com', 
+  'hmac-sha1-etm@openssh.com',
+  
+  // Standard MAC algorithms
   'hmac-sha2-256',
   'hmac-sha2-512',
   'hmac-sha1',
 ] as const;
 
 // Compression Algorithms
+// Matching ssh2's DEFAULT_COMPRESSION exactly
 export const COMPRESSION_ALGORITHMS = [
   'none',
-  'zlib@openssh.com',
+  'zlib@openssh.com',  // ssh2's preferred order
+  'zlib',              // ssh2 includes this too
 ] as const;
 
 // Authentication Methods

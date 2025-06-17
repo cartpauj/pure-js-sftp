@@ -129,10 +129,10 @@ const config = {
   timeout: 30000,
   keepaliveInterval: 5000,
   algorithms: {
-    kex: ['diffie-hellman-group14-sha256'],
-    hostKey: ['ssh-rsa', 'ecdsa-sha2-nistp256'],
-    cipher: ['aes128-ctr', 'aes256-ctr'],
-    mac: ['hmac-sha2-256'],
+    kex: ['ecdh-sha2-nistp256', 'diffie-hellman-group14-sha256'],
+    hostKey: ['ecdsa-sha2-nistp256', 'rsa-sha2-256', 'ssh-rsa'],
+    cipher: ['aes128-gcm@openssh.com', 'aes128-ctr', 'aes256-ctr'],
+    mac: ['hmac-sha2-256-etm@openssh.com', 'hmac-sha2-256'],
     compress: ['none']
   },
   debug: false

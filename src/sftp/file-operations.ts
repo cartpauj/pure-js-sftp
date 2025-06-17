@@ -7,6 +7,7 @@ import { SFTP_OPEN_FLAGS, SFTP_ATTR, SFTP_MSG } from '../ssh/constants';
 import { PacketBuilder } from '../ssh/packet';
 import { createReadStream, createWriteStream, promises as fs } from 'fs';
 import { Readable, Writable } from 'stream';
+import { randomBytes } from 'crypto';
 
 export class FileOperations {
   private sftpClient: SFTPClient;
@@ -83,7 +84,7 @@ export class FileOperations {
    */
   private async writeFile(handle: Buffer, offset: number, data: Buffer): Promise<void> {
     return new Promise((resolve, reject) => {
-      const id = Math.floor(Math.random() * 0xFFFFFFFF);
+      const id = randomBytes(4).readUInt32BE(0);
       
       const payload = Buffer.concat([
         handle,
@@ -108,7 +109,7 @@ export class FileOperations {
    */
   async stat(remotePath: string): Promise<{ size?: number; permissions?: number; uid?: number; gid?: number; atime?: number; mtime?: number }> {
     return new Promise((resolve, reject) => {
-      const id = Math.floor(Math.random() * 0xFFFFFFFF);
+      const id = randomBytes(4).readUInt32BE(0);
       
       this.sftpClient.once('sftpAttrs', (data) => {
         if (data.id === id) {
@@ -126,7 +127,7 @@ export class FileOperations {
    */
   async remove(remotePath: string): Promise<void> {
     return new Promise((resolve, reject) => {
-      const id = Math.floor(Math.random() * 0xFFFFFFFF);
+      const id = randomBytes(4).readUInt32BE(0);
       
       this.sftpClient.once('sftpStatus', (data) => {
         if (data.id === id) {
@@ -144,7 +145,7 @@ export class FileOperations {
    */
   async rename(oldPath: string, newPath: string): Promise<void> {
     return new Promise((resolve, reject) => {
-      const id = Math.floor(Math.random() * 0xFFFFFFFF);
+      const id = randomBytes(4).readUInt32BE(0);
       
       const payload = Buffer.concat([
         PacketBuilder.buildString(oldPath),
@@ -167,7 +168,7 @@ export class FileOperations {
    */
   async mkdir(remotePath: string, attrs?: any): Promise<void> {
     return new Promise((resolve, reject) => {
-      const id = Math.floor(Math.random() * 0xFFFFFFFF);
+      const id = randomBytes(4).readUInt32BE(0);
       
       const payload = Buffer.concat([
         PacketBuilder.buildString(remotePath),
@@ -190,7 +191,7 @@ export class FileOperations {
    */
   async rmdir(remotePath: string): Promise<void> {
     return new Promise((resolve, reject) => {
-      const id = Math.floor(Math.random() * 0xFFFFFFFF);
+      const id = randomBytes(4).readUInt32BE(0);
       
       this.sftpClient.once('sftpStatus', (data) => {
         if (data.id === id) {
