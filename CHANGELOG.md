@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.4] - 2024-12-17
+
+### Fixed
+- **CRITICAL**: Fixed missing SFTP packet sending in file operations
+- **CRITICAL**: Enabled all commented-out SFTP protocol calls
+- **CRITICAL**: Made sendSFTPPacket method public in SFTPClient
+- **CRITICAL**: Fixed list() method to properly use SFTPClient.listDirectory
+- Added proper DirectoryEntry type import
+- Fixed TypeScript compilation errors
+
+### Technical Details
+- All file operations (get, put, delete, rename, mkdir, rmdir, stat) now properly send SFTP packets
+- SftpClient class now has complete ssh2-sftp-client compatible API
+- Fixed module exports to properly expose SftpClient with all methods
+
 ## [1.0.3] - 2024-12-17
 
 ### Changed

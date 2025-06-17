@@ -3,7 +3,7 @@
  */
 
 import { SFTPClient } from './sftp-client';
-import { SFTP_OPEN_FLAGS, SFTP_ATTR } from '../ssh/constants';
+import { SFTP_OPEN_FLAGS, SFTP_ATTR, SFTP_MSG } from '../ssh/constants';
 import { PacketBuilder } from '../ssh/packet';
 import { createReadStream, createWriteStream, promises as fs } from 'fs';
 import { Readable, Writable } from 'stream';
@@ -99,7 +99,7 @@ export class FileOperations {
       });
 
       this.sftpClient.once('sftpError', reject);
-      // this.sftpClient.sendSFTPPacket(SFTP_MSG.WRITE, payload, id);
+      this.sftpClient.sendSFTPPacket(SFTP_MSG.WRITE, payload, id);
     });
   }
 
@@ -117,7 +117,7 @@ export class FileOperations {
       });
 
       this.sftpClient.once('sftpError', reject);
-      // this.sftpClient.sendSFTPPacket(SFTP_MSG.STAT, PacketBuilder.buildString(remotePath), id);
+      this.sftpClient.sendSFTPPacket(SFTP_MSG.STAT, PacketBuilder.buildString(remotePath), id);
     });
   }
 
@@ -135,7 +135,7 @@ export class FileOperations {
       });
 
       this.sftpClient.once('sftpError', reject);
-      // this.sftpClient.sendSFTPPacket(SFTP_MSG.REMOVE, PacketBuilder.buildString(remotePath), id);
+      this.sftpClient.sendSFTPPacket(SFTP_MSG.REMOVE, PacketBuilder.buildString(remotePath), id);
     });
   }
 
@@ -158,7 +158,7 @@ export class FileOperations {
       });
 
       this.sftpClient.once('sftpError', reject);
-      // this.sftpClient.sendSFTPPacket(SFTP_MSG.RENAME, payload, id);
+      this.sftpClient.sendSFTPPacket(SFTP_MSG.RENAME, payload, id);
     });
   }
 
@@ -181,7 +181,7 @@ export class FileOperations {
       });
 
       this.sftpClient.once('sftpError', reject);
-      // this.sftpClient.sendSFTPPacket(SFTP_MSG.MKDIR, payload, id);
+      this.sftpClient.sendSFTPPacket(SFTP_MSG.MKDIR, payload, id);
     });
   }
 
@@ -199,7 +199,7 @@ export class FileOperations {
       });
 
       this.sftpClient.once('sftpError', reject);
-      // this.sftpClient.sendSFTPPacket(SFTP_MSG.RMDIR, PacketBuilder.buildString(remotePath), id);
+      this.sftpClient.sendSFTPPacket(SFTP_MSG.RMDIR, PacketBuilder.buildString(remotePath), id);
     });
   }
 

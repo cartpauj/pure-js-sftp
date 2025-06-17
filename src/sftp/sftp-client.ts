@@ -262,7 +262,7 @@ export class SFTPClient extends EventEmitter {
   /**
    * Send SFTP packet
    */
-  private sendSFTPPacket(type: SFTP_MSG, payload: Buffer = Buffer.alloc(0), id?: number): void {
+  public sendSFTPPacket(type: SFTP_MSG, payload: Buffer = Buffer.alloc(0), id?: number): void {
     const packet = PacketBuilder.buildSFTPPacket(type, payload, id);
     
     const channelData = Buffer.concat([

@@ -6,7 +6,7 @@ import { SSHClient } from '../client/ssh-client';
 import { FileOperations } from '../sftp/file-operations';
 import { BulkOperations } from '../sftp/bulk-operations';
 import { SFTPReadStream, SFTPWriteStream } from '../sftp/stream-support';
-import { SSHConfig, FileInfo, FileStats } from '../ssh/types';
+import { SSHConfig, FileInfo, FileStats, DirectoryEntry } from '../ssh/types';
 
 export class HighLevelAPI {
   private sshClient: SSHClient | null = null;
@@ -54,10 +54,26 @@ export class HighLevelAPI {
    * List directory contents
    */
   async list(remotePath: string, filter?: RegExp | ((item: FileInfo) => boolean)): Promise<FileInfo[]> {
-    if (!this.fileOps) throw new Error('Not connected');
+    if (!this.sftpClient) throw new Error('Not connected');
     
-    // TODO: Implement list via fileOps
-    const items: FileInfo[] = [];
+    // Use SFTPClient's listDirectory method
+    const entries = await this.sftpClient.listDirectory(remotePath);
+    
+    // Convert DirectoryEntry[] to FileInfo[]
+    const items: FileInfo[] = entries.map((entry: DirectoryEntry) => ({
+      type: entry.attrs.permissions ? (entry.attrs.permissions & 0o170000) === 0o040000 ? 'd' : '-' : '-',
+      name: entry.filename,
+      size: entry.attrs.size || 0,
+      modifyTime: new Date((entry.attrs.mtime || 0) * 1000),
+      accessTime: new Date((entry.attrs.atime || 0) * 1000),
+      rights: {
+        user: entry.attrs.permissions ? ((entry.attrs.permissions & 0o700) >> 6).toString(8) : '7',
+        group: entry.attrs.permissions ? ((entry.attrs.permissions & 0o070) >> 3).toString(8) : '7',
+        other: entry.attrs.permissions ? (entry.attrs.permissions & 0o007).toString(8) : '7'
+      },
+      owner: entry.attrs.uid || 0,
+      group: entry.attrs.gid || 0
+    }));
     
     if (!filter) return items;
     
