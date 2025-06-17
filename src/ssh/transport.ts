@@ -197,6 +197,8 @@ export class SSHTransport extends EventEmitter {
         this.emit('kexdhReply', packet.payload);  // Use same event as DH for compatibility
         break;
       case SSH_MSG.NEWKEYS:
+        this.debug('Received NEWKEYS - encryption should now be enabled');
+        // TODO: Enable encryption/MAC for all subsequent packets
         this.emit('newkeys');
         break;
       case SSH_MSG.SERVICE_ACCEPT:

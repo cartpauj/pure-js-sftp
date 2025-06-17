@@ -105,34 +105,31 @@ export const HOST_KEY_ALGORITHMS = [
 ] as const;
 
 // Encryption Algorithms  
-// Matching ssh2's DEFAULT_CIPHER exactly
+// TEMPORARY: Add 'none' first to avoid encryption until we implement it
 export const ENCRYPTION_ALGORITHMS = [
-  // GCM ciphers first (ssh2's priority)
-  'aes128-gcm@openssh.com',
-  'aes256-gcm@openssh.com',
+  'none',  // No encryption - TEMPORARY workaround
   
-  // CTR ciphers
-  'aes128-ctr',
-  'aes192-ctr',
-  'aes256-ctr',
-  
-  // Note: ssh2 adds chacha20-poly1305@openssh.com based on CPU support
-  // We'll add it as basic support
-  'chacha20-poly1305@openssh.com',
+  // Real encryption algorithms (commented out until implemented)
+  // 'aes128-gcm@openssh.com',
+  // 'aes256-gcm@openssh.com',
+  // 'aes128-ctr',
+  // 'aes192-ctr', 
+  // 'aes256-ctr',
+  // 'chacha20-poly1305@openssh.com',
 ] as const;
 
 // MAC Algorithms
-// Matching ssh2's DEFAULT_MAC exactly
+// TEMPORARY: Add 'none' first to avoid MAC until we implement it
 export const MAC_ALGORITHMS = [
-  // ETM (Encrypt-then-MAC) variants first (ssh2's priority)
-  'hmac-sha2-256-etm@openssh.com',
-  'hmac-sha2-512-etm@openssh.com', 
-  'hmac-sha1-etm@openssh.com',
+  'none',  // No MAC - TEMPORARY workaround
   
-  // Standard MAC algorithms
-  'hmac-sha2-256',
-  'hmac-sha2-512',
-  'hmac-sha1',
+  // Real MAC algorithms (commented out until implemented)
+  // 'hmac-sha2-256-etm@openssh.com',
+  // 'hmac-sha2-512-etm@openssh.com', 
+  // 'hmac-sha1-etm@openssh.com',
+  // 'hmac-sha2-256',
+  // 'hmac-sha2-512',
+  // 'hmac-sha1',
 ] as const;
 
 // Compression Algorithms
