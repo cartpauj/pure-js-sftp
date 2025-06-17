@@ -17,10 +17,13 @@ export class KexManager extends EventEmitter {
   private clientKexInit: Buffer | null = null;
   private serverKexInit: Buffer | null = null;
   private kexAlgorithm: string | null = null;
+  private cipherAlgorithm: string | null = null;
+  private macAlgorithm: string | null = null;
   private dhKex: DiffieHellmanKex | null = null;
   private ecdhKex: ECDHKeyExchange | null = null;
   private exchangeHash: Buffer | null = null;
   private sessionId: Buffer | null = null;
+  private sharedSecret: Buffer | null = null;
 
   constructor(transport: SSHTransport) {
     super();
@@ -122,12 +125,22 @@ export class KexManager extends EventEmitter {
       
       // Choose algorithms
       this.kexAlgorithm = this.chooseAlgorithm(KEX_ALGORITHMS, serverKexInit.kex_algorithms);
+      this.cipherAlgorithm = this.chooseAlgorithm(ENCRYPTION_ALGORITHMS, serverKexInit.encryption_algorithms_client_to_server);
+      this.macAlgorithm = this.chooseAlgorithm(MAC_ALGORITHMS, serverKexInit.mac_algorithms_client_to_server);
       
       if (!this.kexAlgorithm) {
         throw new SSHError('No compatible KEX algorithm found', 'KEX_ALGORITHM_MISMATCH');
       }
+      if (!this.cipherAlgorithm) {
+        throw new SSHError('No compatible cipher algorithm found', 'CIPHER_ALGORITHM_MISMATCH');
+      }
+      if (!this.macAlgorithm) {
+        throw new SSHError('No compatible MAC algorithm found', 'MAC_ALGORITHM_MISMATCH');
+      }
       
       this.debug(`Chosen KEX algorithm: ${this.kexAlgorithm}`);
+      this.debug(`Chosen cipher algorithm: ${this.cipherAlgorithm}`);
+      this.debug(`Chosen MAC algorithm: ${this.macAlgorithm}`);
       this.debug(`KEX algorithm type: ${this.kexAlgorithm.startsWith('ecdh-sha2-') ? 'ECDH' : 'DH'}`);
       
       // Start Diffie-Hellman exchange
@@ -342,6 +355,9 @@ export class KexManager extends EventEmitter {
    * Complete key exchange (common for both ECDH and DH)
    */
   private completeKeyExchange(sharedSecret: Buffer): void {
+    // Store shared secret for later use in NEWKEYS
+    this.sharedSecret = sharedSecret;
+    
     // First exchange hash becomes session ID
     if (!this.sessionId) {
       this.sessionId = this.exchangeHash!;
@@ -369,6 +385,32 @@ export class KexManager extends EventEmitter {
     // Wait for server NEWKEYS
     this.transport.once('newkeys', () => {
       this.debug('Received NEWKEYS');
+      
+      // Enable encryption now that both sides have sent NEWKEYS
+      try {
+        // Use the negotiated algorithms
+        if (!this.cipherAlgorithm || !this.macAlgorithm || !this.sharedSecret) {
+          throw new Error('Missing negotiated algorithms or shared secret');
+        }
+        
+        const kexHash = this.kexAlgorithm?.includes('sha2-256') ? require('crypto').createHash('sha256').digest : require('crypto').createHash('sha1').digest;
+        
+        this.transport.enableEncryption(
+          this.cipherAlgorithm,
+          this.macAlgorithm,
+          kexHash,
+          this.sharedSecret,
+          this.exchangeHash!,
+          this.sessionId!
+        );
+        
+        this.debug('Encryption enabled after NEWKEYS exchange');
+      } catch (error: any) {
+        this.debug(`Failed to enable encryption: ${error.message}`);
+        this.emit('error', error);
+        return;
+      }
+      
       this.emit('kexComplete', {
         sessionId: this.sessionId,
         exchangeHash: this.exchangeHash,

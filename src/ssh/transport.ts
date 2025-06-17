@@ -8,6 +8,7 @@ import { EventEmitter } from 'events';
 import { PacketParser, PacketBuilder, PacketReader } from './packet';
 import { SSHConfig, SSHPacket, ConnectionState, SSHError } from './types';
 import { SSH_MSG, PROTOCOL_VERSION } from './constants';
+import { SSHEncryption } from '../crypto/ssh-encryption';
 
 export class SSHTransport extends EventEmitter {
   private socket: Socket | null = null;
@@ -18,6 +19,8 @@ export class SSHTransport extends EventEmitter {
   private clientVersion: string = PROTOCOL_VERSION;
   private versionBuffer: string = '';
   private sessionId: Buffer | null = null;
+  private encryption: SSHEncryption | null = null;
+  private encryptionEnabled = false;
 
   constructor(config: SSHConfig) {
     super();
@@ -198,7 +201,7 @@ export class SSHTransport extends EventEmitter {
         break;
       case SSH_MSG.NEWKEYS:
         this.debug('Received NEWKEYS - encryption should now be enabled');
-        // TODO: Enable encryption/MAC for all subsequent packets
+        // Encryption will be enabled when kexComplete event provides keys
         this.emit('newkeys');
         break;
       case SSH_MSG.SERVICE_ACCEPT:
@@ -256,11 +259,23 @@ export class SSHTransport extends EventEmitter {
       throw new SSHError('Not connected', 'NOT_CONNECTED');
     }
     
-    const packet = PacketBuilder.buildSSHPacket(type, payload);
+    let packet = PacketBuilder.buildSSHPacket(type, payload);
     
     // Verify packet structure for debugging
     const packetLength = packet.readUInt32BE(0);
     this.debug(`Sending packet: type=${type}, totalSize=${packet.length}, contentSize=${packetLength}, contentMod8=${packetLength % 8}`);
+    
+    // If encryption is enabled, encrypt the packet (except length field)
+    if (this.encryptionEnabled && this.encryption) {
+      const lengthField = packet.subarray(0, 4);
+      const content = packet.subarray(4);
+      const encryptedContent = this.encryption.encryptPacket(content);
+      const mac = this.encryption.calculateMac(packet);
+      
+      // Send: [length][encrypted_content][mac]
+      packet = Buffer.concat([lengthField, encryptedContent, mac]);
+      this.debug(`Encrypted packet: originalSize=${packet.length}, encryptedSize=${packet.length}`);
+    }
     
     this.socket.write(packet);
     this.debug(`Sent SSH packet type: ${type}, size: ${packet.length}`);
@@ -275,6 +290,35 @@ export class SSHTransport extends EventEmitter {
     }
     
     this.socket.write(data);
+  }
+
+  /**
+   * Enable encryption after NEWKEYS exchange
+   */
+  enableEncryption(
+    cipherAlgo: string,
+    macAlgo: string,
+    kexHash: (data: Buffer) => Buffer,
+    sharedSecret: Buffer,
+    exchangeHash: Buffer,
+    sessionId: Buffer
+  ): void {
+    try {
+      this.debug(`Enabling encryption: cipher=${cipherAlgo}, mac=${macAlgo}`);
+      this.encryption = new SSHEncryption(
+        cipherAlgo,
+        macAlgo,
+        kexHash,
+        sharedSecret,
+        exchangeHash,
+        sessionId
+      );
+      this.encryptionEnabled = true;
+      this.debug('Encryption enabled successfully');
+    } catch (error: any) {
+      this.debug(`Failed to enable encryption: ${error.message}`);
+      throw new SSHError(`Encryption setup failed: ${error.message}`, 'ENCRYPTION_FAILED');
+    }
   }
 
   /**
