@@ -1,6 +1,6 @@
 {
   "name": "pure-js-sftp",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "A pure JavaScript SFTP client with no native dependencies",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
