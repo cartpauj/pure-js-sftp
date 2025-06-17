@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.5] - 2024-12-17
+
+### Added
+- **TESTING**: Comprehensive test suite for all fixed functionality
+- **TESTING**: API validation tests to ensure ssh2-sftp-client compatibility
+- **TESTING**: Built package tests to verify CommonJS exports
+- **TESTING**: Integration tests covering all 23 API methods
+
+### Fixed
+- Updated test coverage to validate all critical fixes
+- Added proper error handling validation in tests
+- Confirmed all 4 requirements are properly implemented and tested
+
 ## [1.0.4] - 2024-12-17
 
 ### Fixed
