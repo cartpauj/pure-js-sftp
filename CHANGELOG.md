@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.2] - 2024-12-17
+
+### Fixed
+- Confirmed README.md displays properly on npmjs.com
+- Package documentation now fully visible on npm registry
+
+## [1.0.1] - 2024-12-17
+
+### Fixed
+- Added comprehensive release documentation
+- Improved npm package display
+
 ## [1.0.0] - 2024-12-17
 
 ### Added
