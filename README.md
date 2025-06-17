@@ -1,46 +1,28 @@
-# Pure JS SFTP Client
+# pure-js-sftp
+
+[![npm version](https://badge.fury.io/js/pure-js-sftp.svg)](https://badge.fury.io/js/pure-js-sftp)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
 A production-ready, pure JavaScript SFTP client with **zero native dependencies**. Designed to solve compatibility issues in environments where native modules fail to load (VSCode extensions, serverless functions, Docker containers, etc.).
 
-## 🎯 Why Pure JS SFTP?
+## ✨ Features
 
-**The Problem:** Popular SFTP libraries like `ssh2` and `ssh2-sftp-client` depend on native `.node` modules that fail to load in many environments:
-- VSCode extensions on Linux 
-- Serverless functions (AWS Lambda, Vercel)
-- Docker containers with different architectures
-- Electron applications
-- CI/CD pipelines with restricted environments
-
-**The Solution:** A complete SFTP implementation in pure JavaScript that works everywhere Node.js runs.
-
-## 🚀 Key Features
-
-### ✨ Zero Dependencies Issues
 - **Pure JavaScript**: No native `.node` files or compilation required
 - **Cross-platform**: Works on Windows, macOS, Linux, ARM64, x86
 - **Universal Compatibility**: VSCode extensions, serverless, containers, CI/CD
-- **Instant Setup**: No build tools, Python, or system dependencies needed
-
-### 🔄 Drop-in Replacement
-- **100% API Compatible** with `ssh2-sftp-client`
+- **100% API Compatible** with `ssh2-sftp-client` - drop-in replacement
 - **Zero Code Changes** required for migration
-- **Same Method Names**: `connect()`, `get()`, `put()`, `list()`, etc.
-- **Identical Return Types**: FileInfo, FileStats, streams
-
-### 🏗️ Complete SFTP Implementation
 - **Full SSH2 Protocol**: Handshake, key exchange, authentication
 - **SFTP v3 Support**: All standard file operations
 - **Advanced Features**: Streams, bulk operations, progress tracking
-- **Modern Async/Await**: Promise-based API throughout
-
-### 🛡️ Production Ready
 - **TypeScript Support**: Full type definitions included
 - **Comprehensive Testing**: 107 tests with NIST/RFC validation and protocol compliance
-- **Industry Standards**: Cryptographic functions verified against Node.js built-ins
-- **Error Handling**: Proper error types and recovery mechanisms
+- **Production Ready**: Industry-standard cryptographic functions
 - **Memory Efficient**: Optimized for large file transfers and streaming
 
 ## 📦 Installation
+
+### For End Users
 
 ```bash
 npm install pure-js-sftp
@@ -48,9 +30,37 @@ npm install pure-js-sftp
 
 No additional dependencies or build steps required!
 
-## 🔧 Quick Start
+### For Developers
 
-### Basic File Operations
+If you want to contribute or build from source:
+
+```bash
+# Clone the repository
+git clone https://github.com/cartpauj/pure-js-sftp.git
+cd pure-js-sftp
+
+# Install dependencies
+npm install
+
+# Build the library
+npm run build
+
+# Run tests
+npm test
+```
+
+#### Development Scripts
+
+- `npm run build` - Compile TypeScript
+- `npm run dev` - Watch mode compilation
+- `npm test` - Run the test suite
+- `npm run test:watch` - Run tests in watch mode
+- `npm run test:coverage` - Run tests with coverage
+- `npm run lint` - Check code quality
+
+## 📚 Usage Examples
+
+### 1. Basic File Operations
 
 ```javascript
 const SftpClient = require('pure-js-sftp').default;
@@ -96,20 +106,18 @@ async function sftpOperations() {
     await sftp.end();
   }
 }
-
-sftpOperations();
 ```
 
-### Advanced Features
+### 2. Fast Parallel Transfers
 
-#### Fast Parallel Transfers
 ```javascript
 // Optimized uploads/downloads with parallel chunks
 await sftp.fastPut('./large-file.zip', '/remote/large-file.zip');
 await sftp.fastGet('/remote/large-file.zip', './downloaded-large-file.zip');
 ```
 
-#### Streaming Large Files
+### 3. Streaming Large Files
+
 ```javascript
 const fs = require('fs');
 
@@ -123,7 +131,8 @@ const uploadStream = sftp.createWriteStream('/remote/upload.dat');
 fs.createReadStream('./local-file.dat').pipe(uploadStream);
 ```
 
-#### Bulk Directory Operations
+### 4. Bulk Directory Operations
+
 ```javascript
 // Upload entire directory with progress tracking
 await sftp.uploadDir('./local-project', '/remote/backup', {
@@ -139,7 +148,7 @@ await sftp.downloadDir('/remote/backup', './restored-project', {
 });
 ```
 
-### TypeScript Usage
+### 5. TypeScript Usage
 
 ```typescript
 import SftpClient, { SSHConfig, FileInfo, FileStats } from 'pure-js-sftp';
@@ -172,6 +181,36 @@ files.forEach((file: FileInfo) => {
 const stats: FileStats = await sftp.stat('/home/data.txt');
 if (stats.isFile()) {
   console.log(`File size: ${stats.size} bytes`);
+}
+```
+
+### 6. VS Code Extension Usage
+
+```javascript
+// Perfect for VS Code extensions - no native dependencies!
+const vscode = require('vscode');
+const SftpClient = require('pure-js-sftp').default;
+
+async function deployToSFTP() {
+  try {
+    const sftp = new SftpClient();
+    
+    await sftp.connect({
+      host: vscode.workspace.getConfiguration('sftp').get('host'),
+      username: vscode.workspace.getConfiguration('sftp').get('username'),
+      password: await vscode.window.showInputBox({ 
+        prompt: 'Enter SFTP password', 
+        password: true 
+      })
+    });
+    
+    // Upload current workspace
+    await sftp.uploadDir(vscode.workspace.rootPath, '/remote/project');
+    
+    vscode.window.showInformationMessage('Deploy completed successfully!');
+  } catch (error) {
+    vscode.window.showErrorMessage(`Deploy failed: ${error.message}`);
+  }
 }
 ```
 
@@ -470,49 +509,36 @@ try {
 }
 ```
 
-## 📋 Requirements
+## 🏗️ Requirements
 
-- **Node.js**: 14.0.0 or higher
-- **Platform**: Any platform supported by Node.js
-- **Dependencies**: None (pure JavaScript)
+- **Node.js**: 14.0.0 or higher  
+- **Dependencies**: None (pure JavaScript with Node.js built-ins only)
+
+## 🌍 Environments
+
+This library works in any JavaScript environment:
+
+- **Node.js** (14.0.0+) - Server-side applications, CLI tools, automation scripts
+- **VS Code Extensions** - No dependency conflicts with VS Code's environment
+- **Electron Apps** - Desktop applications with web technologies
+- **Serverless Functions** - AWS Lambda, Vercel, Netlify, etc.
+- **Docker Containers** - Universal compatibility regardless of architecture
+- **CI/CD Pipelines** - No build dependencies or native compilation needed
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our contributing guidelines:
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+## 📜 License
 
-### Development Setup
+GPL-3.0 License - see [LICENSE](LICENSE) file for details.
 
-```bash
-git clone https://github.com/cartpauj/pure-js-sftp.git
-cd pure-js-sftp
-npm install
-npm run dev     # Watch mode compilation
-npm test        # Run tests
-```
+## 👨‍💻 Author
 
-## 📄 License
+**Paul C** ([@cartpauj](https://github.com/cartpauj))
 
-This project is licensed under the GPL-3.0 License - see the [LICENSE](LICENSE) file for details.
+## 🙏 Acknowledgments
 
-## 🔗 Related Projects
-
-- **[ssh2](https://github.com/mscdex/ssh2)** - Original SSH2 implementation (with native dependencies)
-- **[ssh2-sftp-client](https://github.com/theophilusx/ssh2-sftp-client)** - High-level wrapper around ssh2
-- **[node-ssh](https://github.com/steelbrain/node-ssh)** - Another SSH client library
-
-## 📞 Support
-
-- **Issues**: [GitHub Issues](https://github.com/cartpauj/pure-js-sftp/issues)
-- **Documentation**: [README.md](README.md) and [examples/](examples/)
-- **Testing Guide**: [TESTING.md](TESTING.md) - Comprehensive testing information
-- **Migration Help**: [MIGRATION.md](MIGRATION.md)
-
----
-
-**Made with ❤️ for developers who need SFTP that just works everywhere.**
+- OpenSSH project for the SSH/SFTP protocol standards
+- Node.js team for the excellent built-in crypto and networking modules
+- ssh2-sftp-client project for API inspiration and compatibility requirements

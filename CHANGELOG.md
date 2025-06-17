@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.3] - 2024-12-17
+
+### Changed
+- Improved README.md formatting and structure consistency with other packages
+- Added npm version and license badges
+- Restructured installation section with developer/end-user subsections
+- Enhanced usage examples with numbered organization
+- Added Requirements and Environments sections
+- Standardized footer sections (Contributing, License, Author, Acknowledgments)
+
 ## [1.0.2] - 2024-12-17
 
 ### Fixed
