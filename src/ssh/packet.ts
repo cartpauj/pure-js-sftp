@@ -143,16 +143,19 @@ export class PacketBuilder {
    * Build SSH packet
    */
   static buildSSHPacket(type: SSH_MSG, payload: Buffer = Buffer.alloc(0)): Buffer {
-    // Calculate padding according to RFC 4253
+    // SSH packet structure: [packet_length(4)][padding_length(1)][message_type(1)][payload][padding]
+    // RFC 4253: The total length of (padding_length + message_type + payload + padding) 
+    // must be a multiple of the cipher block size (8 bytes for no encryption)
     const blockSize = 8;
-    const minPadding = 4; // Minimum padding required
+    const minPadding = 4; // Minimum padding required by RFC 4253
 
-    // Calculate total size without padding: padding_length(1) + message_type(1) + payload
-    const sizeWithoutPadding = 1 + 1 + payload.length;
+    // Calculate the size that needs to be padded: padding_length(1) + message_type(1) + payload
+    const baseSizeWithoutPadding = 1 + 1 + payload.length;
 
-    // Calculate padding needed to make total size a multiple of blockSize, with minimum of 4 bytes
+    // Find padding length that makes (baseSizeWithoutPadding + paddingLength) a multiple of blockSize
+    // Start with minimum padding and adjust upward
     let paddingLength = minPadding;
-    while ((sizeWithoutPadding + paddingLength) % blockSize !== 0) {
+    while ((baseSizeWithoutPadding + paddingLength) % blockSize !== 0) {
         paddingLength++;
     }
     
@@ -160,12 +163,13 @@ export class PacketBuilder {
     const padding = randomBytes(paddingLength);
     
     // Build packet: [packet_length][padding_length][message_type][payload][padding]
+    // packet_length excludes itself, so it's the length of everything after it
     const packetLength = 1 + 1 + payload.length + paddingLength; // padding_length + message_type + payload + padding
     
     const packet = Buffer.alloc(4 + packetLength);
     let offset = 0;
     
-    // Write packet length
+    // Write packet length (excludes the 4-byte length field itself)
     packet.writeUInt32BE(packetLength, offset);
     offset += 4;
     

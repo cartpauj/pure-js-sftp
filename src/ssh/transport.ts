@@ -255,6 +255,11 @@ export class SSHTransport extends EventEmitter {
     }
     
     const packet = PacketBuilder.buildSSHPacket(type, payload);
+    
+    // Verify packet structure for debugging
+    const packetLength = packet.readUInt32BE(0);
+    this.debug(`Sending packet: type=${type}, totalSize=${packet.length}, contentSize=${packetLength}, contentMod8=${packetLength % 8}`);
+    
     this.socket.write(packet);
     this.debug(`Sent SSH packet type: ${type}, size: ${packet.length}`);
   }
