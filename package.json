@@ -12,22 +12,44 @@
     "test:coverage": "jest --coverage",
     "lint": "ESLINT_USE_FLAT_CONFIG=false eslint src/**/*.ts",
     "lint:fix": "ESLINT_USE_FLAT_CONFIG=false eslint src/**/*.ts --fix",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build && npm test"
   },
   "keywords": [
     "sftp",
     "ssh",
+    "ssh2",
     "pure-javascript",
     "no-native-dependencies",
     "file-transfer",
-    "vscode-compatible"
+    "vscode-compatible",
+    "serverless",
+    "lambda",
+    "docker",
+    "typescript",
+    "cross-platform",
+    "ssh2-sftp-client",
+    "drop-in-replacement"
   ],
-  "author": "",
+  "author": {
+    "name": "Paul C",
+    "url": "https://github.com/cartpauj"
+  },
   "license": "GPL-3.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cartpauj/pure-js-sftp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/cartpauj/pure-js-sftp/issues"
+  },
+  "homepage": "https://github.com/cartpauj/pure-js-sftp#readme",
   "files": [
     "dist/",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md",
+    "MIGRATION.md",
+    "TESTING.md"
   ],
   "engines": {
     "node": ">=14.0.0"
