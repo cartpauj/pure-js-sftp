@@ -193,6 +193,9 @@ export class SSHTransport extends EventEmitter {
       case SSH_MSG.KEXDH_REPLY:  // ADDED
         this.emit('kexdhReply', packet.payload);
         break;
+      case SSH_MSG.KEXECDH_REPLY:  // ECDH key exchange reply
+        this.emit('kexdhReply', packet.payload);  // Use same event as DH for compatibility
+        break;
       case SSH_MSG.NEWKEYS:
         this.emit('newkeys');
         break;

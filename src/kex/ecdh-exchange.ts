@@ -45,6 +45,11 @@ export class ECDHKeyExchange {
     // Create ECDH instance and generate keys (following ssh2's approach)
     this.ecdh = createECDH(this.curveName);
     this.clientPublicKey = this.ecdh.generateKeys();
+    
+    // Verify the public key is in uncompressed format (should start with 0x04)
+    if (this.clientPublicKey[0] !== 0x04) {
+      throw new Error(`ECDH public key not in uncompressed format: first byte is 0x${this.clientPublicKey[0].toString(16)}`);
+    }
   }
 
   /**
