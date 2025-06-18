@@ -6,7 +6,8 @@ export interface SSH2StreamsConfig {
   host: string;
   port?: number;
   username: string;
-  privateKey: Buffer | string;
+  privateKey?: Buffer | string;
+  password?: string;
   passphrase?: string;
   algorithms?: {
     kex?: string[];
@@ -170,25 +171,32 @@ export class SSH2StreamsTransport extends EventEmitter {
   }
 
   private startAuthentication(): void {
-    this.emit('debug', 'Starting public key authentication');
-    
-    try {
-      // Parse the private key
-      const parsedKeys = ssh2Streams.utils.parseKey(this.config.privateKey, this.config.passphrase);
-      const parsedKey = parsedKeys[0];
-      const publicKeySSH = parsedKey.getPublicSSH();
+    if (this.config.password) {
+      this.emit('debug', 'Starting password authentication');
+      this.ssh.authPassword(this.config.username, this.config.password);
+    } else if (this.config.privateKey) {
+      this.emit('debug', 'Starting public key authentication');
+      
+      try {
+        // Parse the private key
+        const parsedKeys = ssh2Streams.utils.parseKey(this.config.privateKey, this.config.passphrase);
+        const parsedKey = parsedKeys[0];
+        const publicKeySSH = parsedKey.getPublicSSH();
 
-      // Authenticate with public key
-      this.ssh.authPK(this.config.username, publicKeySSH, (buf: Buffer, cb: (signature: Buffer) => void) => {
-        try {
-          const signature = parsedKey.sign(buf);
-          cb(signature);
-        } catch (error) {
-          this.emit('error', new Error(`Signing failed: ${error instanceof Error ? error.message : String(error)}`));
-        }
-      });
-    } catch (error) {
-      this.emit('error', new Error(`Key parsing failed: ${error instanceof Error ? error.message : String(error)}`));
+        // Authenticate with public key
+        this.ssh.authPK(this.config.username, publicKeySSH, (buf: Buffer, cb: (signature: Buffer) => void) => {
+          try {
+            const signature = parsedKey.sign(buf);
+            cb(signature);
+          } catch (error) {
+            this.emit('error', new Error(`Signing failed: ${error instanceof Error ? error.message : String(error)}`));
+          }
+        });
+      } catch (error) {
+        this.emit('error', new Error(`Key parsing failed: ${error instanceof Error ? error.message : String(error)}`));
+      }
+    } else {
+      this.emit('error', new Error('No authentication method provided: must provide either password or privateKey'));
     }
   }
 

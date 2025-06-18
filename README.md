@@ -62,7 +62,15 @@ async function sftpOperations() {
   const sftp = new SftpClient('my-client'); // Optional client name for identification
   
   try {
-    // Connect to server
+    // Connect to server with password (simple and reliable)
+    await sftp.connect({
+      host: 'sftp.example.com',
+      port: 22,
+      username: 'your-username',
+      password: 'your-password'    // Password authentication
+    });
+    
+    // OR connect with private key
     await sftp.connect({
       host: 'sftp.example.com',
       port: 22,
@@ -107,7 +115,16 @@ async function sftpOperations() {
 ```typescript
 import { SSH2StreamsSFTPClient, SFTPClientOptions } from 'pure-js-sftp';
 
-const config: SFTPClientOptions = {
+// With password authentication
+const configPassword: SFTPClientOptions = {
+  host: 'sftp.example.com',
+  username: 'user',
+  password: 'your-password',
+  port: 22
+};
+
+// With private key authentication
+const configKey: SFTPClientOptions = {
   host: 'sftp.example.com',
   username: 'user',
   privateKey: require('fs').readFileSync('/path/to/key'),
@@ -115,7 +132,7 @@ const config: SFTPClientOptions = {
   port: 22
 };
 
-const sftp = new SSH2StreamsSFTPClient(config);
+const sftp = new SSH2StreamsSFTPClient(configPassword);
 await sftp.connect();
 
 // Type-safe file listing
@@ -136,6 +153,14 @@ async function deployToSFTP() {
   try {
     const sftp = new SftpClient();
     
+    // Use password authentication for simplicity
+    await sftp.connect({
+      host: vscode.workspace.getConfiguration('sftp').get('host'),
+      username: vscode.workspace.getConfiguration('sftp').get('username'),
+      password: vscode.workspace.getConfiguration('sftp').get('password')
+    });
+    
+    // OR use private key authentication
     await sftp.connect({
       host: vscode.workspace.getConfiguration('sftp').get('host'),
       username: vscode.workspace.getConfiguration('sftp').get('username'),
@@ -189,6 +214,13 @@ await sftp.end(); // Same as disconnect()
 
 ## 📚 Complete API Reference
 
+### Authentication Methods
+
+pure-js-sftp supports two authentication methods:
+
+1. **🔐 Password Authentication** - Simple and widely supported
+2. **🔑 Private Key Authentication** - More secure, supports RSA, ECDSA, Ed25519
+
 ### Connection Management
 
 ```javascript
@@ -197,7 +229,7 @@ await sftp.connect({
   host: 'sftp.example.com',
   port: 22,                    // Default: 22
   username: 'user',
-  password: 'password'         // Password auth (if supported by ssh2-streams)
+  password: 'password'         // Password authentication - now fully supported!
 });
 
 // Connect with private key authentication

@@ -24,6 +24,7 @@ declare module 'ssh2-streams' {
     constructor(options?: SSH2StreamOptions);
     
     service(serviceName: string): void;
+    authPassword(username: string, password: string): void;
     authPK(username: string, pubKey: Buffer, callback?: (buf: Buffer, cb: (signature: Buffer) => void) => void): void;
     session(channel?: number, initWindow?: number, maxPacket?: number): void;
     subsystem(channelId: number, name: string, wantReply: boolean): void;

@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.3] - 2025-06-18
+
+### 🔐 **PASSWORD AUTHENTICATION SUPPORT**
+
+#### **✨ New Features**
+- **Password Authentication** - Full support for username/password authentication
+- **Dual Authentication Methods** - Choose between password or private key authentication
+- **Enhanced API Flexibility** - Both `password` and `privateKey` options now supported
+
+#### **🔧 Implementation Details**
+- Added `password` field to `SSH2StreamsConfig` interface
+- Updated SSH transport layer to handle both authentication methods
+- Enhanced TypeScript definitions for `authPassword` method
+- Improved error handling for authentication failures
+
+#### **📖 Documentation Updates**
+- Updated README with password authentication examples
+- Added TypeScript usage examples for both auth methods
+- Enhanced VS Code extension examples
+- Added authentication methods section to API reference
+
+#### **🛡️ Security & Compatibility**
+- Test files properly excluded from npm package and git repository
+- Maintains 100% backward compatibility with existing private key authentication
+- No breaking changes to existing API
+
 ## [2.1.0] - 2025-06-18
 
 ### 🎯 **COMPLETE SSH2-SFTP-CLIENT COMPATIBILITY**

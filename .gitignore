@@ -55,3 +55,8 @@ pids
 # Temporary folders
 tmp/
 temp/
+
+# Test files (exclude sensitive test credentials)
+test-*.js
+test-*.ts
+*test-connection*
