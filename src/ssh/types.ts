@@ -170,6 +170,14 @@ export interface FileAttributes {
   atime?: number;
   mtime?: number;
   extended?: { [key: string]: string };
+  // Helper methods for compatibility
+  isFile?(): boolean;
+  isDirectory?(): boolean;
+  isSymbolicLink?(): boolean;
+  isBlockDevice?(): boolean;
+  isCharacterDevice?(): boolean;
+  isFIFO?(): boolean;
+  isSocket?(): boolean;
 }
 
 // Directory Entry

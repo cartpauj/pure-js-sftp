@@ -6,6 +6,8 @@ import { EventEmitter } from 'events';
 import { SSH2StreamsTransport, SSH2StreamsConfig, SFTPChannel } from '../ssh/ssh2-streams-transport';
 import { SFTP_MSG, SFTP_VERSION, SFTP_STATUS, SFTP_OPEN_FLAGS, SFTP_ATTR, SFTPPacket, FileAttributes, DirectoryEntry, SFTPError } from '../ssh/types';
 
+export type { DirectoryEntry, FileAttributes } from '../ssh/types';
+
 export interface SFTPClientOptions extends SSH2StreamsConfig {}
 
 export class SSH2StreamsSFTPClient extends EventEmitter {
@@ -380,6 +382,80 @@ export class SSH2StreamsSFTPClient extends EventEmitter {
     pathLength.writeUInt32BE(pathBuffer.length, 0);
     const payload = Buffer.concat([pathLength, pathBuffer]);
     return this.sendSFTPRequest(SFTP_MSG.STAT, payload);
+  }
+
+  /**
+   * Write data to a file handle
+   */
+  async writeFile(handle: Buffer, offset: number, data: Buffer): Promise<void> {
+    const handleLength = Buffer.allocUnsafe(4);
+    handleLength.writeUInt32BE(handle.length, 0);
+    
+    const offsetBuffer = Buffer.allocUnsafe(8);
+    offsetBuffer.writeBigUInt64BE(BigInt(offset), 0);
+    
+    const dataLength = Buffer.allocUnsafe(4);
+    dataLength.writeUInt32BE(data.length, 0);
+    
+    const payload = Buffer.concat([handleLength, handle, offsetBuffer, dataLength, data]);
+    return this.sendSFTPRequest(SFTP_MSG.WRITE, payload);
+  }
+
+  /**
+   * Remove a file
+   */
+  async removeFile(path: string): Promise<void> {
+    const pathBuffer = Buffer.from(path, 'utf8');
+    const pathLength = Buffer.allocUnsafe(4);
+    pathLength.writeUInt32BE(pathBuffer.length, 0);
+    const payload = Buffer.concat([pathLength, pathBuffer]);
+    return this.sendSFTPRequest(SFTP_MSG.REMOVE, payload);
+  }
+
+  /**
+   * Rename a file
+   */
+  async renameFile(oldPath: string, newPath: string): Promise<void> {
+    const oldPathBuffer = Buffer.from(oldPath, 'utf8');
+    const oldPathLength = Buffer.allocUnsafe(4);
+    oldPathLength.writeUInt32BE(oldPathBuffer.length, 0);
+    
+    const newPathBuffer = Buffer.from(newPath, 'utf8');
+    const newPathLength = Buffer.allocUnsafe(4);
+    newPathLength.writeUInt32BE(newPathBuffer.length, 0);
+    
+    const payload = Buffer.concat([oldPathLength, oldPathBuffer, newPathLength, newPathBuffer]);
+    return this.sendSFTPRequest(SFTP_MSG.RENAME, payload);
+  }
+
+  /**
+   * Create a directory
+   */
+  async makeDirectory(path: string, attrs?: Partial<FileAttributes>): Promise<void> {
+    const pathBuffer = Buffer.from(path, 'utf8');
+    const pathLength = Buffer.allocUnsafe(4);
+    pathLength.writeUInt32BE(pathBuffer.length, 0);
+    
+    // Simple attributes - just set directory flag
+    const attrFlags = Buffer.allocUnsafe(4);
+    attrFlags.writeUInt32BE(SFTP_ATTR.PERMISSIONS, 0);
+    
+    const permissions = Buffer.allocUnsafe(4);
+    permissions.writeUInt32BE(attrs?.permissions || 0o755, 0);
+    
+    const payload = Buffer.concat([pathLength, pathBuffer, attrFlags, permissions]);
+    return this.sendSFTPRequest(SFTP_MSG.MKDIR, payload);
+  }
+
+  /**
+   * Remove a directory
+   */
+  async removeDirectory(path: string): Promise<void> {
+    const pathBuffer = Buffer.from(path, 'utf8');
+    const pathLength = Buffer.allocUnsafe(4);
+    pathLength.writeUInt32BE(pathBuffer.length, 0);
+    const payload = Buffer.concat([pathLength, pathBuffer]);
+    return this.sendSFTPRequest(SFTP_MSG.RMDIR, payload);
   }
 
   /**

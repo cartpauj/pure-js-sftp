@@ -71,13 +71,28 @@ async function sftpOperations() {
       passphrase: 'key-passphrase-if-encrypted' // Optional for encrypted keys
     });
     
+    // Upload a file
+    await sftp.put('./local-file.txt', '/remote/uploaded-file.txt');
+    console.log('✅ File uploaded successfully');
+    
+    // Download a file  
+    await sftp.get('/remote/data.json', './downloaded-data.json');
+    console.log('✅ File downloaded successfully');
+    
     // List directory contents
-    const files = await sftp.listDirectory('/remote/directory');
+    const files = await sftp.list('/remote/directory');
     console.log('📁 Directory contents:', files.length, 'items');
     
-    // Get file stats
+    // Create directory
+    await sftp.mkdir('/remote/new-folder', true); // recursive
+    
+    // Check if file exists
+    const exists = await sftp.exists('/remote/uploaded-file.txt');
+    console.log('🔍 File exists:', exists);
+    
+    // Get file info
     const stats = await sftp.stat('/remote/uploaded-file.txt');
-    console.log('📊 File info:', stats);
+    console.log('📊 File size:', stats.size, 'bytes');
     
   } catch (error) {
     console.error('❌ SFTP Error:', error.message);
@@ -104,7 +119,7 @@ const sftp = new SSH2StreamsSFTPClient(config);
 await sftp.connect();
 
 // Type-safe file listing
-const files = await sftp.listDirectory('/home');
+const files = await sftp.list('/home');
 files.forEach(file => {
   console.log(`${file.filename} (${file.attrs.size} bytes)`);
 });
@@ -128,7 +143,7 @@ async function deployToSFTP() {
     });
     
     // Use SFTP operations
-    const files = await sftp.listDirectory('/remote/project');
+    const files = await sftp.list('/remote/project');
     
     vscode.window.showInformationMessage('SFTP connected successfully!');
   } catch (error) {
@@ -153,7 +168,7 @@ const Client = require('pure-js-sftp').default;
 // All your existing code works unchanged!
 const sftp = new Client();
 await sftp.connect(config);
-const files = await sftp.listDirectory('/path');
+const files = await sftp.list('/path');
 // ... etc
 ```
 
@@ -213,18 +228,29 @@ sftp.disconnect();
 ### File Operations
 
 ```javascript
+// Upload/Download
+await sftp.put(localPath, remotePath);
+await sftp.get(remotePath, localPath);
+
 // File management
+await sftp.delete(remotePath);
+await sftp.rename(oldPath, newPath);
+const exists = await sftp.exists(remotePath);        // Returns: false | 'd' | '-' | 'l'
+const stats = await sftp.stat(remotePath);           // FileAttributes object
+
+// Low-level file operations (advanced)
 const handle = await sftp.openFile(remotePath, flags);  // Returns Buffer handle
 const data = await sftp.readFile(handle, offset, length);
 await sftp.closeFile(handle);
-const stats = await sftp.stat(remotePath);              // FileAttributes object
 ```
 
 ### Directory Operations
 
 ```javascript
 // Directory management
-const files = await sftp.listDirectory(remotePath);     // Array of DirectoryEntry
+const files = await sftp.list(remotePath);           // Array of DirectoryEntry
+await sftp.mkdir(remotePath, recursive);             // Create directory
+await sftp.rmdir(remotePath, recursive);             // Remove directory
 ```
 
 ## 🔑 SSH Key Support
