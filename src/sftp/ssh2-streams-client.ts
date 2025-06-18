@@ -20,6 +20,7 @@ export class SSH2StreamsSFTPClient extends EventEmitter {
     reject: (error: Error) => void;
     type: string;
   }>();
+  private dataBuffer: Buffer = Buffer.alloc(0);
 
   constructor(options: SFTPClientOptions) {
     super();
@@ -132,13 +133,20 @@ export class SSH2StreamsSFTPClient extends EventEmitter {
   }
 
   private handleSFTPData(data: Buffer): void {
+    // Append new data to buffer
+    this.dataBuffer = Buffer.concat([this.dataBuffer, data]);
+    
     let offset = 0;
 
-    while (offset + 4 <= data.length) {
-      const length = data.readUInt32BE(offset);
-      if (offset + 4 + length > data.length) break;
+    while (offset + 4 <= this.dataBuffer.length) {
+      const length = this.dataBuffer.readUInt32BE(offset);
+      
+      // Check if we have the complete packet
+      if (offset + 4 + length > this.dataBuffer.length) {
+        break; // Wait for more data
+      }
 
-      const packetData = data.subarray(offset + 4, offset + 4 + length);
+      const packetData = this.dataBuffer.subarray(offset + 4, offset + 4 + length);
       const type = packetData.readUInt8(0) as SFTP_MSG;
       
       let id: number | undefined;
@@ -153,6 +161,11 @@ export class SSH2StreamsSFTPClient extends EventEmitter {
       this.handleSFTPPacket(packet);
       
       offset += 4 + length;
+    }
+    
+    // Remove processed data from buffer
+    if (offset > 0) {
+      this.dataBuffer = this.dataBuffer.subarray(offset);
     }
   }
 
@@ -182,7 +195,7 @@ export class SSH2StreamsSFTPClient extends EventEmitter {
             request.resolve(entries);
             break;
           case SFTP_MSG.ATTRS:
-            const attrs = this.parseFileAttributes(packet.payload, 0);
+            const { attrs } = this.parseFileAttributes(packet.payload, 0);
             request.resolve(attrs);
             break;
         }
@@ -252,6 +265,27 @@ export class SSH2StreamsSFTPClient extends EventEmitter {
       attrs.atime = buffer.readUInt32BE(offset + bytesRead);
       attrs.mtime = buffer.readUInt32BE(offset + bytesRead + 4);
       bytesRead += 8;
+    }
+
+    // Add helper methods for file type detection
+    if (attrs.permissions !== undefined) {
+      const mode = attrs.permissions;
+      attrs.isFile = () => (mode & 0o170000) === 0o100000; // S_IFREG
+      attrs.isDirectory = () => (mode & 0o170000) === 0o040000; // S_IFDIR
+      attrs.isSymbolicLink = () => (mode & 0o170000) === 0o120000; // S_IFLNK
+      attrs.isBlockDevice = () => (mode & 0o170000) === 0o060000; // S_IFBLK
+      attrs.isCharacterDevice = () => (mode & 0o170000) === 0o020000; // S_IFCHR
+      attrs.isFIFO = () => (mode & 0o170000) === 0o010000; // S_IFIFO
+      attrs.isSocket = () => (mode & 0o170000) === 0o140000; // S_IFSOCK
+    } else {
+      // Fallback when permissions not available
+      attrs.isFile = () => false;
+      attrs.isDirectory = () => false;
+      attrs.isSymbolicLink = () => false;
+      attrs.isBlockDevice = () => false;
+      attrs.isCharacterDevice = () => false;
+      attrs.isFIFO = () => false;
+      attrs.isSocket = () => false;
     }
 
     return { attrs, bytesRead };
@@ -456,6 +490,78 @@ export class SSH2StreamsSFTPClient extends EventEmitter {
     pathLength.writeUInt32BE(pathBuffer.length, 0);
     const payload = Buffer.concat([pathLength, pathBuffer]);
     return this.sendSFTPRequest(SFTP_MSG.RMDIR, payload);
+  }
+
+  /**
+   * Set file attributes
+   */
+  async setAttributes(path: string, attrs: Partial<FileAttributes>): Promise<void> {
+    const pathBuffer = Buffer.from(path, 'utf8');
+    const pathLength = Buffer.allocUnsafe(4);
+    pathLength.writeUInt32BE(pathBuffer.length, 0);
+    
+    const attrFlags = Buffer.allocUnsafe(4);
+    let flags = 0;
+    let attrData = Buffer.alloc(0);
+    
+    if (attrs.permissions !== undefined) {
+      flags |= SFTP_ATTR.PERMISSIONS;
+      const permBuffer = Buffer.allocUnsafe(4);
+      permBuffer.writeUInt32BE(attrs.permissions, 0);
+      attrData = Buffer.concat([attrData, permBuffer]);
+    }
+    
+    if (attrs.size !== undefined) {
+      flags |= SFTP_ATTR.SIZE;
+      const sizeBuffer = Buffer.allocUnsafe(8);
+      sizeBuffer.writeBigUInt64BE(BigInt(attrs.size), 0);
+      attrData = Buffer.concat([attrData, sizeBuffer]);
+    }
+    
+    if (attrs.uid !== undefined && attrs.gid !== undefined) {
+      flags |= SFTP_ATTR.UIDGID;
+      const uidBuffer = Buffer.allocUnsafe(4);
+      const gidBuffer = Buffer.allocUnsafe(4);
+      uidBuffer.writeUInt32BE(attrs.uid, 0);
+      gidBuffer.writeUInt32BE(attrs.gid, 0);
+      attrData = Buffer.concat([attrData, uidBuffer, gidBuffer]);
+    }
+    
+    if (attrs.atime !== undefined && attrs.mtime !== undefined) {
+      flags |= SFTP_ATTR.ACMODTIME;
+      const atimeBuffer = Buffer.allocUnsafe(4);
+      const mtimeBuffer = Buffer.allocUnsafe(4);
+      atimeBuffer.writeUInt32BE(attrs.atime, 0);
+      mtimeBuffer.writeUInt32BE(attrs.mtime, 0);
+      attrData = Buffer.concat([attrData, atimeBuffer, mtimeBuffer]);
+    }
+    
+    attrFlags.writeUInt32BE(flags, 0);
+    const payload = Buffer.concat([pathLength, pathBuffer, attrFlags, attrData]);
+    return this.sendSFTPRequest(SFTP_MSG.SETSTAT, payload);
+  }
+
+  /**
+   * Get real path (resolve symbolic links)
+   */
+  async realPath(path: string): Promise<string> {
+    const pathBuffer = Buffer.from(path, 'utf8');
+    const pathLength = Buffer.allocUnsafe(4);
+    pathLength.writeUInt32BE(pathBuffer.length, 0);
+    const payload = Buffer.concat([pathLength, pathBuffer]);
+    
+    const result = await this.sendSFTPRequest(SFTP_MSG.REALPATH, payload);
+    
+    // Parse NAME response - should contain one entry with the real path
+    if (result && result.length > 4) {
+      const count = result.readUInt32BE(0);
+      if (count > 0) {
+        const nameLength = result.readUInt32BE(4);
+        return result.subarray(8, 8 + nameLength).toString('utf8');
+      }
+    }
+    
+    throw new Error('Invalid realpath response');
   }
 
   /**

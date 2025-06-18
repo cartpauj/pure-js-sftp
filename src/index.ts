@@ -70,15 +70,24 @@ export class SftpClient extends EventEmitter {
     if (!this.client) throw new Error('Not connected');
     
     const handle = await this.client.openFile(remotePath, SFTP_OPEN_FLAGS.WRITE | SFTP_OPEN_FLAGS.CREAT | SFTP_OPEN_FLAGS.TRUNC);
-    const readStream = fs.createReadStream(localPath);
     
     try {
       let offset = 0;
       const chunkSize = 32768; // 32KB chunks
+      const buffer = Buffer.allocUnsafe(chunkSize);
       
-      for await (const chunk of readStream) {
-        await this.client.writeFile(handle, offset, chunk);
-        offset += chunk.length;
+      const fd = await fs.promises.open(localPath, 'r');
+      try {
+        while (true) {
+          const { bytesRead } = await fd.read(buffer, 0, chunkSize, offset);
+          if (bytesRead === 0) break; // End of file
+          
+          const chunk = buffer.subarray(0, bytesRead);
+          await this.client.writeFile(handle, offset, chunk);
+          offset += bytesRead;
+        }
+      } finally {
+        await fd.close();
       }
     } finally {
       await this.client.closeFile(handle);
@@ -99,17 +108,34 @@ export class SftpClient extends EventEmitter {
     if (!this.client) throw new Error('Not connected');
     
     if (recursive) {
-      // Split path and create directories recursively
-      const parts = remotePath.split('/').filter(p => p);
-      let currentPath = remotePath.startsWith('/') ? '/' : '';
+      // Normalize path and split into parts
+      const normalizedPath = remotePath.replace(/\/+/g, '/'); // Remove duplicate slashes
+      const parts = normalizedPath.split('/').filter(p => p);
+      let currentPath = normalizedPath.startsWith('/') ? '' : '';
       
       for (const part of parts) {
-        currentPath = currentPath === '/' ? `/${part}` : `${currentPath}/${part}`;
+        currentPath = currentPath ? `${currentPath}/${part}` : (normalizedPath.startsWith('/') ? `/${part}` : part);
+        
         try {
-          await this.client.makeDirectory(currentPath);
+          // Check if directory already exists first
+          const stats = await this.client.stat(currentPath);
+          if (stats.isDirectory?.()) {
+            continue; // Directory exists, skip
+          } else {
+            throw new Error(`Path exists but is not a directory: ${currentPath}`);
+          }
         } catch (error: any) {
-          // Ignore error if directory already exists
-          if (!error.message?.includes('File exists')) {
+          // Directory doesn't exist, try to create it
+          if (error.message?.includes('No such file') || error.message?.includes('not a directory')) {
+            try {
+              await this.client.makeDirectory(currentPath);
+            } catch (createError: any) {
+              // Only ignore if directory was created by another process
+              if (!createError.message?.includes('File exists')) {
+                throw new Error(`Failed to create directory ${currentPath}: ${createError.message}`);
+              }
+            }
+          } else {
             throw error;
           }
         }
@@ -123,6 +149,19 @@ export class SftpClient extends EventEmitter {
     if (!this.client) throw new Error('Not connected');
     
     if (recursive) {
+      // First check if directory exists and is actually a directory
+      try {
+        const stats = await this.client.stat(remotePath);
+        if (!stats.isDirectory?.()) {
+          throw new Error(`Path is not a directory: ${remotePath}`);
+        }
+      } catch (error: any) {
+        if (error.message?.includes('No such file')) {
+          return; // Directory doesn't exist, nothing to remove
+        }
+        throw error;
+      }
+
       // List directory contents and remove recursively
       try {
         const entries = await this.client.listDirectory(remotePath);
@@ -130,7 +169,10 @@ export class SftpClient extends EventEmitter {
         for (const entry of entries) {
           if (entry.filename === '.' || entry.filename === '..') continue;
           
-          const fullPath = `${remotePath}/${entry.filename}`;
+          // Normalize path construction
+          const fullPath = remotePath.endsWith('/') 
+            ? `${remotePath}${entry.filename}` 
+            : `${remotePath}/${entry.filename}`;
           
           if (entry.attrs.isDirectory?.()) {
             await this.rmdir(fullPath, true);
@@ -138,25 +180,23 @@ export class SftpClient extends EventEmitter {
             await this.client.removeFile(fullPath);
           }
         }
-      } catch (error) {
-        // Directory might be empty or not exist
+      } catch (error: any) {
+        // If we can't list the directory, it might be empty or permission denied
+        if (!error.message?.includes('No such file')) {
+          throw new Error(`Failed to list directory contents: ${error.message}`);
+        }
       }
     }
     
     return this.client.removeDirectory(remotePath);
   }
 
-  async exists(remotePath: string): Promise<false | 'd' | '-' | 'l'> {
+  async exists(remotePath: string): Promise<boolean> {
     if (!this.client) throw new Error('Not connected');
     
     try {
-      const stats = await this.client.stat(remotePath);
-      
-      if (stats.isDirectory?.()) return 'd';
-      if (stats.isSymbolicLink?.()) return 'l';
-      if (stats.isFile?.()) return '-';
-      
-      return '-'; // Default to file
+      await this.client.stat(remotePath);
+      return true;
     } catch (error) {
       return false;
     }
@@ -165,6 +205,119 @@ export class SftpClient extends EventEmitter {
   async stat(remotePath: string) {
     if (!this.client) throw new Error('Not connected');
     return this.client.stat(remotePath);
+  }
+
+  // Fast transfer methods (optimized versions)
+  async fastGet(remotePath: string, localPath: string, options?: any): Promise<string> {
+    if (!this.client) throw new Error('Not connected');
+    
+    // For now, use regular get - can be optimized later with parallel streams
+    await this.get(remotePath, localPath);
+    return localPath;
+  }
+
+  async fastPut(localPath: string, remotePath: string, options?: any): Promise<string> {
+    if (!this.client) throw new Error('Not connected');
+    
+    // For now, use regular put - can be optimized later with parallel streams
+    await this.put(localPath, remotePath);
+    return remotePath;
+  }
+
+  async append(input: string | Buffer, remotePath: string, options?: any): Promise<string> {
+    if (!this.client) throw new Error('Not connected');
+    
+    const handle = await this.client.openFile(remotePath, SFTP_OPEN_FLAGS.WRITE | SFTP_OPEN_FLAGS.CREAT | SFTP_OPEN_FLAGS.APPEND);
+    
+    try {
+      const data = Buffer.isBuffer(input) ? input : Buffer.from(input, 'utf8');
+      const stats = await this.client.stat(remotePath);
+      const offset = stats.size || 0;
+      
+      await this.client.writeFile(handle, offset, data);
+    } finally {
+      await this.client.closeFile(handle);
+    }
+    
+    return remotePath;
+  }
+
+  async chmod(remotePath: string, mode: string | number): Promise<void> {
+    if (!this.client) throw new Error('Not connected');
+    
+    const numericMode = typeof mode === 'string' ? parseInt(mode, 8) : mode;
+    return this.client.setAttributes(remotePath, { permissions: numericMode });
+  }
+
+  async realPath(remotePath: string): Promise<string> {
+    if (!this.client) throw new Error('Not connected');
+    return this.client.realPath(remotePath);
+  }
+
+  async uploadDir(srcDir: string, dstDir: string, options?: { filter?: (path: string, isDirectory: boolean) => boolean }): Promise<void> {
+    if (!this.client) throw new Error('Not connected');
+    
+    const fs = await import('fs/promises');
+    const path = await import('path');
+    
+    // Create destination directory if it doesn't exist
+    try {
+      await this.mkdir(dstDir, true);
+    } catch (error) {
+      // Directory might already exist
+    }
+    
+    const entries = await fs.readdir(srcDir, { withFileTypes: true });
+    
+    for (const entry of entries) {
+      const srcPath = path.join(srcDir, entry.name);
+      const dstPath = `${dstDir}/${entry.name}`;
+      
+      // Apply filter if provided
+      if (options?.filter && !options.filter(srcPath, entry.isDirectory())) {
+        continue;
+      }
+      
+      if (entry.isDirectory()) {
+        await this.uploadDir(srcPath, dstPath, options);
+      } else {
+        await this.put(srcPath, dstPath);
+      }
+    }
+  }
+
+  async downloadDir(srcDir: string, dstDir: string, options?: { filter?: (path: string, isDirectory: boolean) => boolean }): Promise<void> {
+    if (!this.client) throw new Error('Not connected');
+    
+    const fs = await import('fs/promises');
+    const path = await import('path');
+    
+    // Create local destination directory if it doesn't exist
+    try {
+      await fs.mkdir(dstDir, { recursive: true });
+    } catch (error) {
+      // Directory might already exist
+    }
+    
+    const entries = await this.client.listDirectory(srcDir);
+    
+    for (const entry of entries) {
+      if (entry.filename === '.' || entry.filename === '..') continue;
+      
+      const srcPath = `${srcDir}/${entry.filename}`;
+      const dstPath = path.join(dstDir, entry.filename);
+      
+      // Apply filter if provided
+      if (options?.filter && !options.filter(srcPath, entry.attrs.isDirectory?.() || false)) {
+        continue;
+      }
+      
+      if (entry.attrs.isDirectory?.()) {
+        await this.downloadDir(srcPath, dstPath, options);
+      } else {
+        await this.get(srcPath, dstPath);
+      }
+    }
   }
 
   // Alias for ssh2-sftp-client compatibility

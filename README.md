@@ -169,7 +169,9 @@ const Client = require('pure-js-sftp').default;
 const sftp = new Client();
 await sftp.connect(config);
 const files = await sftp.list('/path');
-// ... etc
+await sftp.put('./local.txt', '/remote.txt');
+await sftp.get('/remote.txt', './downloaded.txt');
+await sftp.end();
 ```
 
 ### Why Migrate?
@@ -185,7 +187,7 @@ const files = await sftp.list('/path');
 | **Performance** | ✅ Good | ✅ Comparable | Similar speeds |
 | **Features** | ✅ Full featured | ✅ Core features | Essential capabilities |
 
-## 📚 API Reference
+## 📚 Complete API Reference
 
 ### Connection Management
 
@@ -222,36 +224,111 @@ await sftp.connect({
 });
 
 // Graceful disconnect
-sftp.disconnect();
+await sftp.end();              // Preferred method (ssh2-sftp-client compatible)
+sftp.disconnect();             // Alternative method
 ```
 
-### File Operations
+### File Transfer Operations
 
 ```javascript
-// Upload/Download
-await sftp.put(localPath, remotePath);
-await sftp.get(remotePath, localPath);
+// Basic file transfer
+await sftp.put(localPath, remotePath);                    // Upload file
+await sftp.get(remotePath, localPath);                    // Download file
 
-// File management
-await sftp.delete(remotePath);
-await sftp.rename(oldPath, newPath);
-const exists = await sftp.exists(remotePath);        // Returns: false | 'd' | '-' | 'l'
-const stats = await sftp.stat(remotePath);           // FileAttributes object
+// Fast file transfer (optimized for larger files)
+await sftp.fastPut(localPath, remotePath, options);       // Fast upload
+await sftp.fastGet(remotePath, localPath, options);       // Fast download
 
-// Low-level file operations (advanced)
-const handle = await sftp.openFile(remotePath, flags);  // Returns Buffer handle
-const data = await sftp.readFile(handle, offset, length);
-await sftp.closeFile(handle);
+// Append to files
+await sftp.append(data, remotePath, options);             // Append string or Buffer
+```
+
+### File Management
+
+```javascript
+// File operations
+await sftp.delete(remotePath);                            // Delete file
+await sftp.rename(oldPath, newPath);                      // Rename/move file
+const exists = await sftp.exists(remotePath);             // Returns: boolean
+const stats = await sftp.stat(remotePath);                // Get file stats
+await sftp.chmod(remotePath, '755');                      // Change permissions
+await sftp.chmod(remotePath, 0o755);                      // Numeric permissions
+
+// Path operations
+const absolutePath = await sftp.realPath(remotePath);     // Resolve absolute path
 ```
 
 ### Directory Operations
 
 ```javascript
-// Directory management
-const files = await sftp.list(remotePath);           // Array of DirectoryEntry
-await sftp.mkdir(remotePath, recursive);             // Create directory
-await sftp.rmdir(remotePath, recursive);             // Remove directory
+// Directory listing and management
+const files = await sftp.list(remotePath);                // List directory contents
+await sftp.mkdir(remotePath, recursive);                  // Create directory
+await sftp.rmdir(remotePath, recursive);                  // Remove directory
+
+// Bulk directory operations
+await sftp.uploadDir(localDir, remoteDir, options);       // Upload entire directory
+await sftp.downloadDir(remoteDir, localDir, options);     // Download entire directory
+
+// Directory operations with filtering
+await sftp.uploadDir('./src', '/remote/src', {
+  filter: (path, isDirectory) => {
+    // Upload only .js and .ts files, skip node_modules
+    if (isDirectory) return !path.includes('node_modules');
+    return path.endsWith('.js') || path.endsWith('.ts');
+  }
+});
 ```
+
+### Advanced/Low-Level Operations
+
+```javascript
+// Direct file handle operations (for advanced users)
+const handle = await sftp.openFile(remotePath, flags);    // Open file handle
+const data = await sftp.readFile(handle, offset, length); // Read from handle
+await sftp.writeFile(handle, offset, data);               // Write to handle
+await sftp.closeFile(handle);                             // Close handle
+
+// Additional low-level methods
+await sftp.listDirectory(remotePath);                     // Alternative to list()
+```
+
+## 📋 Complete Method List
+
+**100% ssh2-sftp-client Compatible Methods:**
+
+| Method | Description | Returns |
+|--------|-------------|---------|
+| `connect(config)` | Connect to SFTP server | `Promise<void>` |
+| `end()` | Disconnect from server | `Promise<void>` |
+| `list(remotePath)` | List directory contents | `Promise<DirectoryEntry[]>` |
+| `exists(remotePath)` | Check if path exists | `Promise<boolean>` |
+| `stat(remotePath)` | Get file/directory stats | `Promise<FileAttributes>` |
+| `get(remotePath, localPath)` | Download file | `Promise<void>` |
+| `put(localPath, remotePath)` | Upload file | `Promise<void>` |
+| `fastGet(remotePath, localPath, options?)` | Fast download | `Promise<string>` |
+| `fastPut(localPath, remotePath, options?)` | Fast upload | `Promise<string>` |
+| `append(data, remotePath, options?)` | Append to file | `Promise<string>` |
+| `delete(remotePath)` | Delete file | `Promise<void>` |
+| `rename(oldPath, newPath)` | Rename/move file | `Promise<void>` |
+| `mkdir(remotePath, recursive?)` | Create directory | `Promise<void>` |
+| `rmdir(remotePath, recursive?)` | Remove directory | `Promise<void>` |
+| `chmod(remotePath, mode)` | Change permissions | `Promise<void>` |
+| `realPath(remotePath)` | Get absolute path | `Promise<string>` |
+| `uploadDir(srcDir, dstDir, options?)` | Upload directory tree | `Promise<void>` |
+| `downloadDir(srcDir, dstDir, options?)` | Download directory tree | `Promise<void>` |
+
+**Additional Low-Level Methods:**
+
+| Method | Description | Returns |
+|--------|-------------|---------|
+| `openFile(path, flags?)` | Open file handle | `Promise<Buffer>` |
+| `closeFile(handle)` | Close file handle | `Promise<void>` |
+| `readFile(handle, offset, length)` | Read from handle | `Promise<Buffer>` |
+| `writeFile(handle, offset, data)` | Write to handle | `Promise<void>` |
+| `listDirectory(path)` | List directory (alias) | `Promise<DirectoryEntry[]>` |
+| `disconnect()` | Force disconnect | `void` |
+| `isReady()` | Check connection status | `boolean` |
 
 ## 🔑 SSH Key Support
 
