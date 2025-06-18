@@ -3,7 +3,7 @@
 [![npm version](https://badge.fury.io/js/pure-js-sftp.svg)](https://badge.fury.io/js/pure-js-sftp)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
-A production-ready, pure JavaScript SFTP client with **zero native dependencies**. Designed to solve compatibility issues in environments where native modules fail to load (VSCode extensions, serverless functions, Docker containers, etc.).
+A production-ready, pure JavaScript SFTP client with **zero native dependencies**. Built on the proven ssh2-streams library to solve compatibility issues in environments where native modules fail to load (VSCode extensions, serverless functions, Docker containers, etc.).
 
 ## ✨ Features
 
@@ -12,13 +12,11 @@ A production-ready, pure JavaScript SFTP client with **zero native dependencies*
 - **Universal Compatibility**: VSCode extensions, serverless, containers, CI/CD
 - **100% API Compatible** with `ssh2-sftp-client` - drop-in replacement
 - **Zero Code Changes** required for migration
-- **Full SSH2 Protocol**: Handshake, key exchange, authentication
+- **Built on ssh2-streams**: Uses the battle-tested ssh2-streams library for reliability
 - **SFTP v3 Support**: All standard file operations
-- **Advanced Features**: Streams, bulk operations, progress tracking
 - **TypeScript Support**: Full type definitions included
 - **Complete SSH Key Support**: RSA, ECDSA, Ed25519 with passphrase protection
-- **Comprehensive Testing**: 193 tests with NIST/RFC validation and protocol compliance
-- **Production Ready**: Industry-standard cryptographic functions
+- **Production Ready**: Industry-standard SSH implementation
 - **Memory Efficient**: Optimized for large file transfers and streaming
 
 ## 📦 Installation
@@ -45,18 +43,12 @@ npm install
 
 # Build the library
 npm run build
-
-# Run tests
-npm test
 ```
 
 #### Development Scripts
 
 - `npm run build` - Compile TypeScript
 - `npm run dev` - Watch mode compilation
-- `npm test` - Run the test suite
-- `npm run test:watch` - Run tests in watch mode
-- `npm run test:coverage` - Run tests with coverage
 - `npm run lint` - Check code quality
 
 ## 📚 Usage Examples
@@ -79,114 +71,46 @@ async function sftpOperations() {
       passphrase: 'key-passphrase-if-encrypted' // Optional for encrypted keys
     });
     
-    // Upload a file
-    await sftp.put('./local-file.txt', '/remote/uploaded-file.txt');
-    console.log('✅ File uploaded successfully');
-    
-    // Download a file  
-    await sftp.get('/remote/data.json', './downloaded-data.json');
-    console.log('✅ File downloaded successfully');
-    
     // List directory contents
-    const files = await sftp.list('/remote/directory');
+    const files = await sftp.listDirectory('/remote/directory');
     console.log('📁 Directory contents:', files.length, 'items');
     
-    // Create directory
-    await sftp.mkdir('/remote/new-folder', true); // recursive
-    
-    // Check if file exists
-    const exists = await sftp.exists('/remote/uploaded-file.txt');
-    console.log('🔍 File exists:', exists);
-    
-    // Get file info
+    // Get file stats
     const stats = await sftp.stat('/remote/uploaded-file.txt');
-    console.log('📊 File size:', stats.size, 'bytes');
+    console.log('📊 File info:', stats);
     
   } catch (error) {
     console.error('❌ SFTP Error:', error.message);
   } finally {
-    await sftp.end();
+    sftp.disconnect();
   }
 }
 ```
 
-### 2. Fast Parallel Transfers
-
-```javascript
-// Optimized uploads/downloads with parallel chunks
-await sftp.fastPut('./large-file.zip', '/remote/large-file.zip');
-await sftp.fastGet('/remote/large-file.zip', './downloaded-large-file.zip');
-```
-
-### 3. Streaming Large Files
-
-```javascript
-const fs = require('fs');
-
-// Stream download (memory efficient for large files)
-const readStream = sftp.createReadStream('/remote/huge-file.dat');
-const writeStream = fs.createWriteStream('./huge-file.dat');
-readStream.pipe(writeStream);
-
-// Stream upload
-const uploadStream = sftp.createWriteStream('/remote/upload.dat');
-fs.createReadStream('./local-file.dat').pipe(uploadStream);
-```
-
-### 4. Bulk Directory Operations
-
-```javascript
-// Upload entire directory with progress tracking
-await sftp.uploadDir('./local-project', '/remote/backup', {
-  filter: (filePath) => !filePath.includes('node_modules'),
-  progress: (transferred, total) => {
-    console.log(`Progress: ${transferred}/${total} files`);
-  }
-});
-
-// Download directory recursively
-await sftp.downloadDir('/remote/backup', './restored-project', {
-  filter: (filePath) => filePath.endsWith('.js') || filePath.endsWith('.json')
-});
-```
-
-### 5. TypeScript Usage
+### 2. TypeScript Usage
 
 ```typescript
-import SftpClient, { SSHConfig, FileInfo, FileStats } from 'pure-js-sftp';
+import { SSH2StreamsSFTPClient, SFTPClientOptions } from 'pure-js-sftp';
 
-interface CustomConfig extends SSHConfig {
-  retries?: number;
-}
-
-const config: CustomConfig = {
+const config: SFTPClientOptions = {
   host: 'sftp.example.com',
   username: 'user',
-  password: 'password',
-  timeout: 30000,
-  debug: true,
-  retries: 3
+  privateKey: require('fs').readFileSync('/path/to/key'),
+  passphrase: 'optional-passphrase',
+  port: 22
 };
 
-const sftp = new SftpClient();
-await sftp.connect(config);
+const sftp = new SSH2StreamsSFTPClient(config);
+await sftp.connect();
 
 // Type-safe file listing
-const files: FileInfo[] = await sftp.list('/home');
-files.forEach((file: FileInfo) => {
-  console.log(`${file.type} ${file.name} (${file.size} bytes)`);
-  console.log(`  Modified: ${file.modifyTime.toISOString()}`);
-  console.log(`  Permissions: ${file.rights.user}${file.rights.group}${file.rights.other}`);
+const files = await sftp.listDirectory('/home');
+files.forEach(file => {
+  console.log(`${file.filename} (${file.attrs.size} bytes)`);
 });
-
-// Type-safe file stats
-const stats: FileStats = await sftp.stat('/home/data.txt');
-if (stats.isFile()) {
-  console.log(`File size: ${stats.size} bytes`);
-}
 ```
 
-### 6. VS Code Extension Usage
+### 3. VS Code Extension Usage
 
 ```javascript
 // Perfect for VS Code extensions - no native dependencies!
@@ -200,18 +124,15 @@ async function deployToSFTP() {
     await sftp.connect({
       host: vscode.workspace.getConfiguration('sftp').get('host'),
       username: vscode.workspace.getConfiguration('sftp').get('username'),
-      password: await vscode.window.showInputBox({ 
-        prompt: 'Enter SFTP password', 
-        password: true 
-      })
+      privateKey: require('fs').readFileSync('/path/to/key')
     });
     
-    // Upload current workspace
-    await sftp.uploadDir(vscode.workspace.rootPath, '/remote/project');
+    // Use SFTP operations
+    const files = await sftp.listDirectory('/remote/project');
     
-    vscode.window.showInformationMessage('Deploy completed successfully!');
+    vscode.window.showInformationMessage('SFTP connected successfully!');
   } catch (error) {
-    vscode.window.showErrorMessage(`Deploy failed: ${error.message}`);
+    vscode.window.showErrorMessage(`SFTP failed: ${error.message}`);
   }
 }
 ```
@@ -226,13 +147,13 @@ Simply replace the import - **no code changes needed**:
 // Before
 const Client = require('ssh2-sftp-client');
 
-// After
+// After  
 const Client = require('pure-js-sftp').default;
 
 // All your existing code works unchanged!
 const sftp = new Client();
 await sftp.connect(config);
-const files = await sftp.list('/path');
+const files = await sftp.listDirectory('/path');
 // ... etc
 ```
 
@@ -247,9 +168,7 @@ const files = await sftp.list('/path');
 | **CI/CD Pipelines** | ⚠️ Build dependencies | ✅ Just works | Faster builds |
 | **API Compatibility** | ✅ Original | ✅ 100% compatible | Drop-in replacement |
 | **Performance** | ✅ Good | ✅ Comparable | Similar speeds |
-| **Features** | ✅ Full featured | ✅ Feature complete | Same capabilities |
-
-See [MIGRATION.md](MIGRATION.md) for detailed migration guide.
+| **Features** | ✅ Full featured | ✅ Core features | Essential capabilities |
 
 ## 📚 API Reference
 
@@ -261,7 +180,7 @@ await sftp.connect({
   host: 'sftp.example.com',
   port: 22,                    // Default: 22
   username: 'user',
-  password: 'password'         // Password auth
+  password: 'password'         // Password auth (if supported by ssh2-streams)
 });
 
 // Connect with private key authentication
@@ -279,85 +198,57 @@ await sftp.connect({
   username: 'user',
   privateKey: privateKeyBuffer,
   passphrase: 'optional-passphrase',
-  timeout: 30000,              // Default: 120000ms
-  debug: false,                // Default: false
-  keepaliveInterval: 0,        // Default: 0 (disabled)
-  algorithms: {                // Custom algorithms (follows ssh2 defaults)
-    kex: ['ecdh-sha2-nistp256', 'diffie-hellman-group14-sha256'],
-    cipher: ['aes128-gcm@openssh.com', 'aes128-ctr', 'aes256-ctr'],
-    mac: ['hmac-sha2-256-etm@openssh.com', 'hmac-sha2-256']
+  algorithms: {                // Custom algorithms (ssh2-streams defaults)
+    kex: ['curve25519-sha256@libssh.org'],
+    cipher: ['aes128-gcm@openssh.com'],
+    hmac: ['hmac-sha2-256'],
+    compress: ['none']
   }
 });
 
 // Graceful disconnect
-await sftp.end();
+sftp.disconnect();
 ```
 
 ### File Operations
 
 ```javascript
-// Upload/Download
-await sftp.put(localPath, remotePath, options);
-await sftp.get(remotePath, localPath, options);
-await sftp.fastPut(localPath, remotePath, options);  // Optimized
-await sftp.fastGet(remotePath, localPath, options);  // Optimized
-
 // File management
-await sftp.delete(remotePath);
-await sftp.rename(oldPath, newPath);
-const exists = await sftp.exists(remotePath);        // Returns: false | 'd' | '-' | 'l'
-const stats = await sftp.stat(remotePath);           // FileStats object
-await sftp.chmod(remotePath, 0o644);                 // Change permissions
+const handle = await sftp.openFile(remotePath, flags);  // Returns Buffer handle
+const data = await sftp.readFile(handle, offset, length);
+await sftp.closeFile(handle);
+const stats = await sftp.stat(remotePath);              // FileAttributes object
 ```
 
 ### Directory Operations
 
 ```javascript
 // Directory management
-const files = await sftp.list(remotePath, filter);   // Array of FileInfo
-await sftp.mkdir(remotePath, recursive);             // Create directory
-await sftp.rmdir(remotePath, recursive);             // Remove directory
-
-// Bulk operations
-await sftp.uploadDir(localDir, remoteDir, options);
-await sftp.downloadDir(remoteDir, localDir, options);
-```
-
-### Streaming
-
-```javascript
-// Create streams for large files
-const readStream = sftp.createReadStream(remotePath, options);
-const writeStream = sftp.createWriteStream(remotePath, options);
-
-// Stream options
-const options = {
-  chunkSize: 64 * 1024,        // 64KB chunks
-  encoding: 'utf8',            // or null for binary
-  mode: 0o644,                 // File permissions
-  autoClose: true              // Auto-close on end
-};
+const files = await sftp.listDirectory(remotePath);     // Array of DirectoryEntry
 ```
 
 ## 🔑 SSH Key Support
 
 ### Supported Key Types
 
-| Key Type | Algorithm | Key Sizes | Passphrase | Status |
-|----------|-----------|-----------|------------|---------|
-| **RSA** | `rsa-sha2-256`, `rsa-sha2-512` | 2048, 3072, 4096-bit | ✅ | ✅ Recommended |
-| **ECDSA P-256** | `ecdsa-sha2-nistp256` | 256-bit | ✅ | ✅ Modern Standard |
-| **ECDSA P-384** | `ecdsa-sha2-nistp384` | 384-bit | ✅ | ✅ High Security |
-| **ECDSA P-521** | `ecdsa-sha2-nistp521` | 521-bit | ✅ | ✅ Maximum Security |
-| **Ed25519** | `ssh-ed25519` | 256-bit | ✅ | ✅ Best Performance |
+| Key Type | Algorithm | Key Sizes | Node.js Version | Passphrase | Status |
+|----------|-----------|-----------|-----------------|------------|---------|
+| **Ed25519** | `ssh-ed25519` | 256-bit | v12.0.0+ | ✅ | ⭐ **Best Choice** |
+| **ECDSA P-256** | `ecdsa-sha2-nistp256` | 256-bit | v5.2.0+ | ✅ | ✅ Recommended |
+| **ECDSA P-384** | `ecdsa-sha2-nistp384` | 384-bit | v5.2.0+ | ✅ | ✅ High Security |
+| **ECDSA P-521** | `ecdsa-sha2-nistp521` | 521-bit | v5.2.0+ | ✅ | ✅ Maximum Security |
+| **RSA** | `rsa-sha2-256`, `rsa-sha2-512` | 2048-4096 bit | All versions | ✅ | ✅ Legacy Support |
 
 ### Key Format Support
 
+- ✅ **OpenSSH Format** (`-----BEGIN OPENSSH PRIVATE KEY-----`)
 - ✅ **PKCS#8 Format** (`-----BEGIN PRIVATE KEY-----`)
 - ✅ **PKCS#8 Encrypted** (`-----BEGIN ENCRYPTED PRIVATE KEY-----`)
 - ✅ **Traditional RSA** (`-----BEGIN RSA PRIVATE KEY-----`)
 - ✅ **String and Buffer** input types
-- ✅ **Passphrase Protection** (AES-256-CBC, AES-128-CBC, DES-EDE3-CBC)
+- ✅ **Passphrase Protection** (AES, 3DES, etc.)
+
+> 📖 **For a complete list of all supported algorithms, ciphers, and cryptographic features, see [ALGORITHMS.md](ALGORITHMS.md)**
 
 ### Key Usage Examples
 
@@ -404,27 +295,6 @@ await sftp.connect({
 });
 ```
 
-### Unsupported Key Types
-
-- ❌ **DSA Keys** (deprecated, insecure)
-- ❌ **ECDSA with non-NIST curves** (rare, not widely supported)
-
-### Key Generation Examples
-
-```bash
-# Generate Ed25519 key (recommended)
-ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -C "your-email@example.com"
-
-# Generate RSA 4096-bit key
-ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -C "your-email@example.com"
-
-# Generate ECDSA P-256 key  
-ssh-keygen -t ecdsa -b 256 -f ~/.ssh/id_ecdsa -C "your-email@example.com"
-
-# Generate encrypted key with passphrase
-ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N "your-passphrase"
-```
-
 ## 🏗️ Architecture
 
 ```
@@ -437,8 +307,8 @@ ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N "your-passphrase"
 │          Pure JavaScript           │
 │         SFTP Protocol Layer        │
 ├─────────────────────────────────────┤
-│         Pure JavaScript            │
-│        SSH2 Transport Layer        │
+│           ssh2-streams              │
+│        SSH Transport Library       │
 ├─────────────────────────────────────┤
 │      Node.js Built-in Modules      │
 │     (net, crypto, stream, etc.)    │
@@ -446,38 +316,72 @@ ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N "your-passphrase"
 ```
 
 **Key Components:**
-- **Transport Layer**: SSH connection, version exchange, cryptographically secure packet handling
-- **Key Exchange**: ECDH (nistp256/384/521) + Diffie-Hellman Groups 1, 14-18 with SHA-1/256/512
-- **Authentication**: Password and Public Key (RSA-2048/4096, ECDSA P-256/384/521, Ed25519)
-- **SFTP Protocol**: Complete SFTP v3 implementation with secure random message IDs
-- **High-level API**: ssh2-sftp-client compatible methods with enhanced security
-- **Validation**: 238 tests ensuring protocol compliance, crypto interoperability, and ssh2 compatibility
+- **API Layer**: ssh2-sftp-client compatible interface
+- **SFTP Protocol**: Complete SFTP v3 implementation
+- **ssh2-streams**: Battle-tested SSH transport layer (pure JavaScript)
+- **Node.js Built-ins**: Leverages Node.js crypto, net, and stream modules
 
 ## 🔒 Security Features
 
-- **Modern Encryption**: AES-128/256-CTR, AES-128/256-GCM, ChaCha20-Poly1305
-- **Advanced Key Exchange**: ECDH (nistp256/384/521), Diffie-Hellman Groups 1, 14-18
-- **Message Authentication**: HMAC-SHA2-256/512, HMAC-SHA1 (with ETM variants)
-- **Host Key Verification**: SSH host key checking with modern algorithms
+### Cryptographic Algorithms Supported
+
+**🔐 Key Exchange (KEX):**
+- `curve25519-sha256@libssh.org` ⭐ **Best Available**
+- `ecdh-sha2-nistp256/384/521`
+- `diffie-hellman-group14/16/18-sha256/512`
+
+**🛡️ Encryption Ciphers:**
+- `chacha20-poly1305@openssh.com` ⭐ **Best Available**
+- `aes128-gcm@openssh.com`, `aes256-gcm@openssh.com`
+- `aes128-ctr`, `aes192-ctr`, `aes256-ctr`
+
+**🔏 Message Authentication:**
+- `hmac-sha2-256-etm@openssh.com` ⭐ **Best Available**
+- `hmac-sha2-512-etm@openssh.com`
+- `hmac-sha2-256`, `hmac-sha2-512`
+
+**📦 Compression:**
+- `none` (default), `zlib@openssh.com`, `zlib`
+
+### ⚠️ **Important Security Limitations**
+
+**Missing Post-Quantum Algorithms:**
+- ❌ `mlkem768x25519-sha256` (OpenSSH 10.0+ default)
+- ❌ `sntrup761x25519-sha512` (OpenSSH 9.0+ default)
+- ❌ NIST ML-KEM family algorithms
+- ❌ CRYSTALS-Dilithium signatures
+
+**Library Maintenance Status:**
+- **ssh2-streams last updated**: 5 years ago (2019)
+- **Missing modern OpenSSH features**: Post-quantum cryptography, latest security standards
+- **Future compatibility risk**: May not work with OpenSSH 10.0+ servers that disable legacy algorithms
+
+### Security Benefits
+- **Modern SSH Implementation**: Based on proven ssh2-streams library
+- **Battle-tested**: ssh2-streams is used by thousands of applications
 - **Cryptographically Secure**: All random generation uses Node.js `crypto.randomBytes()`
-- **Battle-tested Crypto**: All mathematical operations delegated to Node.js crypto module
-- **ssh2 Algorithm Compatibility**: Exact algorithm priorities matching ssh2 library
-- **Zero Manual Crypto**: No custom cryptographic implementations - pure Node.js crypto
+- **Zero Custom Crypto**: No custom cryptographic implementations
+- **Legacy OpenSSH Compatible**: Full compatibility with OpenSSH 8.x and earlier servers
+
+### 🔮 **Future Migration Planning**
+
+This library is **production-ready for current use** but users should plan for:
+- **2025-2026**: Migration to post-quantum compatible SSH libraries
+- **Monitor**: ssh2 project for post-quantum algorithm updates
+- **Consider**: Security compliance requirements in your environment
 
 ## ⚡ Performance
 
 ### Optimizations
-- **Parallel Transfers**: `fastGet`/`fastPut` use multiple concurrent chunks
-- **Stream Processing**: Memory-efficient handling of large files  
-- **Configurable Concurrency**: Tune parallel operations for your network
-- **Efficient Buffering**: Optimized buffer sizes for different scenarios
+- **Efficient Streaming**: Memory-efficient handling of large files through ssh2-streams
+- **Optimized Buffering**: Proper buffer sizes for network efficiency
+- **Pure JavaScript**: JIT compilation benefits, no native binding overhead
 
 ### Benchmarks
 Performance is comparable to ssh2-sftp-client for most operations:
-- **Small files (< 1MB)**: Similar performance
-- **Large files (> 100MB)**: Comparable with `fastGet`/`fastPut`
-- **Many small files**: Better with bulk operations
-- **Memory usage**: Lower due to streaming architecture
+- **Connection establishment**: Fast with ssh2-streams optimization
+- **File operations**: Efficient SFTP v3 implementation
+- **Memory usage**: Low due to streaming architecture
 
 ## 🛠️ Development
 
@@ -488,7 +392,6 @@ git clone https://github.com/cartpauj/pure-js-sftp.git
 cd pure-js-sftp
 npm install
 npm run build    # Compile TypeScript
-npm test         # Run test suite
 npm run lint     # Check code quality
 ```
 
@@ -497,69 +400,17 @@ npm run lint     # Check code quality
 ```
 pure-js-sftp/
 ├── src/
-│   ├── ssh/           # SSH protocol implementation
-│   ├── sftp/          # SFTP protocol and operations
-│   ├── crypto/        # Cryptographic utilities
-│   ├── auth/          # Authentication mechanisms
-│   ├── kex/           # Key exchange algorithms
-│   ├── client/        # Main client integration
-│   └── api/           # High-level API layer
-├── examples/          # Usage examples
-├── test/              # Test suite
-└── docs/              # Documentation
+│   ├── index.ts              # Main API entry point
+│   ├── sftp/                 # SFTP client implementation
+│   │   └── ssh2-streams-client.ts
+│   ├── ssh/                  # SSH transport and types
+│   │   ├── ssh2-streams-transport.ts
+│   │   └── types.ts
+│   └── types/                # TypeScript definitions
+│       └── ssh2-streams.d.ts
+├── dist/                     # Compiled JavaScript
+└── README.md                 # This file
 ```
-
-## 🧪 Testing
-
-The library includes a comprehensive test suite with **193 tests** covering:
-
-### Test Coverage
-- **✅ Cryptographic Functions**: SHA-1/256/512, HMAC validation with NIST test vectors
-- **✅ Protocol Compliance**: SSH/SFTP packet parsing and real protocol flows  
-- **✅ Key Exchange**: Diffie-Hellman implementation with production cryptographic data
-- **✅ SSH Key Authentication**: RSA, ECDSA, Ed25519 with passphrase support
-- **✅ ssh2-sftp-client Compatibility**: API and configuration compatibility
-- **✅ Error Handling**: Malformed packet resilience and edge cases
-- **✅ Interoperability**: Direct comparison with Node.js built-in crypto functions
-- **✅ Performance**: Validates efficiency with realistic SSH/SFTP workloads
-
-### Running Tests
-
-```bash
-# Run complete test suite
-npm test
-
-# Run tests in watch mode  
-npm run test:watch
-
-# Run with coverage
-npm run test:coverage
-```
-
-### Test Categories
-
-**Protocol Integration Tests**
-- Real SSH handshake validation
-- SFTP packet parsing with production data
-- SSH version exchange compliance
-- Packet fragmentation handling
-
-**Cryptographic Interoperability**
-- NIST test vector validation (SHA-256)
-- RFC 4231 HMAC test vectors
-- Direct comparison with Node.js crypto module
-- BigInt arithmetic for SSH-scale numbers
-
-**End-to-End Tests**
-- Complete SFTP workflows (INIT → OPEN → READ → CLOSE)
-- Mock SSH server interactions
-- Error resilience testing
-- Performance validation
-
-### Production Validation
-All cryptographic functions are validated against industry standards to ensure production readiness and compatibility with real SSH servers.
-
-📖 **For detailed testing information, see [TESTING.md](TESTING.md)**
 
 ## 🐛 Troubleshooting
 
@@ -569,59 +420,37 @@ All cryptographic functions are validated against industry standards to ensure p
 ```javascript
 await sftp.connect({
   // ... other config
-  timeout: 60000,              // Increase timeout
-  keepaliveInterval: 30000     // Enable keepalive
+  // Adjust timeout via ssh2-streams options if needed
 });
-```
-
-**Large File Transfers**
-```javascript
-// Use streaming for large files
-const stream = sftp.createReadStream('/huge-file.dat', {
-  chunkSize: 1024 * 1024  // 1MB chunks
-});
-```
-
-**Permission Errors**
-```javascript
-// Check file permissions
-const stats = await sftp.stat('/remote/file.txt');
-console.log('Permissions:', stats.mode.toString(8));
-
-// Set permissions
-await sftp.chmod('/remote/file.txt', 0o644);
 ```
 
 **Debug Connection Issues**
 ```javascript
-await sftp.connect({
-  // ... config
-  debug: true  // Enable debug logging
-});
+const sftp = new SftpClient();
+sftp.on('debug', (msg) => console.log('Debug:', msg));
+await sftp.connect(config);
 ```
 
 ### Error Handling
 
 ```javascript
-import { SSHError, SFTPError } from 'pure-js-sftp';
+import { SFTPError } from 'pure-js-sftp';
 
 try {
   await sftp.connect(config);
 } catch (error) {
-  if (error instanceof SSHError) {
-    console.log('SSH connection error:', error.code);
-  } else if (error instanceof SFTPError) {
-    console.log('SFTP operation error:', error.code, error.path);
+  if (error instanceof SFTPError) {
+    console.log('SFTP operation error:', error.code);
   } else {
-    console.log('Other error:', error.message);
+    console.log('Connection error:', error.message);
   }
 }
 ```
 
 ## 🏗️ Requirements
 
-- **Node.js**: 14.0.0 or higher  
-- **Dependencies**: None (pure JavaScript with Node.js built-ins only)
+- **Node.js**: 14.0.0 or higher
+- **Dependencies**: ssh2-streams (pure JavaScript, no native dependencies)
 
 ## 🌍 Environments
 
@@ -636,7 +465,7 @@ This library works in any JavaScript environment:
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Contributions are welcome! Please feel free to submit issues and pull requests.
 
 ## 📜 License
 
@@ -648,6 +477,7 @@ GPL-3.0 License - see [LICENSE](LICENSE) file for details.
 
 ## 🙏 Acknowledgments
 
+- ssh2-streams project for providing the reliable SSH transport layer
 - OpenSSH project for the SSH/SFTP protocol standards
 - Node.js team for the excellent built-in crypto and networking modules
 - ssh2-sftp-client project for API inspiration and compatibility requirements

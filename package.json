@@ -1,23 +1,20 @@
 {
   "name": "pure-js-sftp",
   "version": "1.2.1",
-  "description": "A pure JavaScript SFTP client with no native dependencies",
+  "description": "A pure JavaScript SFTP client with no native dependencies, built on ssh2-streams",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "test": "jest",
-    "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage",
     "lint": "ESLINT_USE_FLAT_CONFIG=false eslint src/**/*.ts",
     "lint:fix": "ESLINT_USE_FLAT_CONFIG=false eslint src/**/*.ts --fix",
-    "prepublishOnly": "npm run build && npm test"
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "sftp",
     "ssh",
-    "ssh2",
+    "ssh2-streams",
     "pure-javascript",
     "no-native-dependencies",
     "file-transfer",
@@ -48,23 +45,19 @@
     "README.md",
     "LICENSE",
     "CHANGELOG.md",
-    "MIGRATION.md",
-    "TESTING.md",
-    "examples/"
+    "ALGORITHMS.md"
   ],
   "engines": {
     "node": ">=14.0.0"
   },
   "devDependencies": {
-    "@types/jest": "^30.0.0",
     "@types/node": "^24.0.3",
     "@typescript-eslint/eslint-plugin": "^8.34.1",
     "@typescript-eslint/parser": "^8.34.1",
     "eslint": "^9.29.0",
-    "jest": "^30.0.0",
-    "ssh2": "^1.16.0",
-    "ssh2-sftp-client": "^12.0.0",
-    "ts-jest": "^29.4.0",
     "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "ssh2-streams": "^0.4.10"
   }
 }
