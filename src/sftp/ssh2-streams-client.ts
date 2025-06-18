@@ -245,11 +245,12 @@ export class SSH2StreamsSFTPClient extends EventEmitter {
 
   private parseFileAttributes(buffer: Buffer, offset: number): { attrs: FileAttributes; bytesRead: number } {
     const flags = buffer.readUInt32BE(offset);
-    const attrs: FileAttributes = { flags };
+    const attrs: Partial<FileAttributes> & { flags: number } = { flags };
     let bytesRead = 4;
 
     if (flags & SFTP_ATTR.SIZE) {
-      attrs.size = buffer.readUInt32BE(offset + bytesRead + 4); // Skip high 32 bits
+      const size64 = buffer.readBigUInt64BE(offset + bytesRead);
+      attrs.size = Number(size64); // Handle 64-bit file sizes correctly
       bytesRead += 8;
     }
     if (flags & SFTP_ATTR.UIDGID) {
@@ -267,7 +268,7 @@ export class SSH2StreamsSFTPClient extends EventEmitter {
       bytesRead += 8;
     }
 
-    // Add helper methods for file type detection
+    // Add helper methods for file type detection (always present for ssh2-sftp-client compatibility)
     if (attrs.permissions !== undefined) {
       const mode = attrs.permissions;
       attrs.isFile = () => (mode & 0o170000) === 0o100000; // S_IFREG
@@ -278,7 +279,7 @@ export class SSH2StreamsSFTPClient extends EventEmitter {
       attrs.isFIFO = () => (mode & 0o170000) === 0o010000; // S_IFIFO
       attrs.isSocket = () => (mode & 0o170000) === 0o140000; // S_IFSOCK
     } else {
-      // Fallback when permissions not available
+      // Fallback when permissions not available - always provide functions
       attrs.isFile = () => false;
       attrs.isDirectory = () => false;
       attrs.isSymbolicLink = () => false;
@@ -288,7 +289,7 @@ export class SSH2StreamsSFTPClient extends EventEmitter {
       attrs.isSocket = () => false;
     }
 
-    return { attrs, bytesRead };
+    return { attrs: attrs as FileAttributes, bytesRead };
   }
 
   private sendSFTPRequest(type: SFTP_MSG, payload: Buffer, expectResponse = true): Promise<any> {
@@ -356,8 +357,7 @@ export class SSH2StreamsSFTPClient extends EventEmitter {
     handleLength.writeUInt32BE(handle.length, 0);
 
     const offsetBuffer = Buffer.allocUnsafe(8);
-    offsetBuffer.writeUInt32BE(0, 0); // High 32 bits
-    offsetBuffer.writeUInt32BE(offset, 4); // Low 32 bits
+    offsetBuffer.writeBigUInt64BE(BigInt(offset), 0); // Use consistent 64-bit handling
 
     const lengthBuffer = Buffer.allocUnsafe(4);
     lengthBuffer.writeUInt32BE(length, 0);
@@ -500,17 +500,11 @@ export class SSH2StreamsSFTPClient extends EventEmitter {
     const pathLength = Buffer.allocUnsafe(4);
     pathLength.writeUInt32BE(pathBuffer.length, 0);
     
-    const attrFlags = Buffer.allocUnsafe(4);
+    // Build attributes in correct RFC order: size, uid/gid, permissions, atime/mtime
     let flags = 0;
     let attrData = Buffer.alloc(0);
     
-    if (attrs.permissions !== undefined) {
-      flags |= SFTP_ATTR.PERMISSIONS;
-      const permBuffer = Buffer.allocUnsafe(4);
-      permBuffer.writeUInt32BE(attrs.permissions, 0);
-      attrData = Buffer.concat([attrData, permBuffer]);
-    }
-    
+    // Order matters! Follow RFC: size, uid/gid, permissions, atime/mtime
     if (attrs.size !== undefined) {
       flags |= SFTP_ATTR.SIZE;
       const sizeBuffer = Buffer.allocUnsafe(8);
@@ -527,6 +521,13 @@ export class SSH2StreamsSFTPClient extends EventEmitter {
       attrData = Buffer.concat([attrData, uidBuffer, gidBuffer]);
     }
     
+    if (attrs.permissions !== undefined) {
+      flags |= SFTP_ATTR.PERMISSIONS;
+      const permBuffer = Buffer.allocUnsafe(4);
+      permBuffer.writeUInt32BE(attrs.permissions, 0);
+      attrData = Buffer.concat([attrData, permBuffer]);
+    }
+    
     if (attrs.atime !== undefined && attrs.mtime !== undefined) {
       flags |= SFTP_ATTR.ACMODTIME;
       const atimeBuffer = Buffer.allocUnsafe(4);
@@ -536,6 +537,7 @@ export class SSH2StreamsSFTPClient extends EventEmitter {
       attrData = Buffer.concat([attrData, atimeBuffer, mtimeBuffer]);
     }
     
+    const attrFlags = Buffer.allocUnsafe(4);
     attrFlags.writeUInt32BE(flags, 0);
     const payload = Buffer.concat([pathLength, pathBuffer, attrFlags, attrData]);
     return this.sendSFTPRequest(SFTP_MSG.SETSTAT, payload);
@@ -550,18 +552,14 @@ export class SSH2StreamsSFTPClient extends EventEmitter {
     pathLength.writeUInt32BE(pathBuffer.length, 0);
     const payload = Buffer.concat([pathLength, pathBuffer]);
     
-    const result = await this.sendSFTPRequest(SFTP_MSG.REALPATH, payload);
+    // sendSFTPRequest for REALPATH returns DirectoryEntry[] from parseNamePacket
+    const entries = await this.sendSFTPRequest(SFTP_MSG.REALPATH, payload) as DirectoryEntry[];
     
-    // Parse NAME response - should contain one entry with the real path
-    if (result && result.length > 4) {
-      const count = result.readUInt32BE(0);
-      if (count > 0) {
-        const nameLength = result.readUInt32BE(4);
-        return result.subarray(8, 8 + nameLength).toString('utf8');
-      }
+    if (entries && entries.length === 1) {
+      return entries[0].filename; // Return the resolved absolute path
     }
     
-    throw new Error('Invalid realpath response');
+    throw new Error('Invalid realpath response: expected exactly one path entry');
   }
 
   /**

@@ -7,6 +7,8 @@
 import { SSH2StreamsSFTPClient, SFTPClientOptions, DirectoryEntry } from './sftp/ssh2-streams-client';
 import { SFTP_OPEN_FLAGS } from './ssh/types';
 import * as fs from 'fs';
+import * as fsPromises from 'fs/promises';
+import * as path from 'path';
 import { EventEmitter } from 'events';
 
 export class SftpClient extends EventEmitter {
@@ -50,7 +52,17 @@ export class SftpClient extends EventEmitter {
         const data = await this.client.readFile(handle, offset, chunkSize);
         if (!data || data.length === 0) break;
         
-        writeStream.write(data);
+        // Wait for write to complete before continuing
+        await new Promise<void>((resolve, reject) => {
+          const written = writeStream.write(data);
+          if (written) {
+            resolve();
+          } else {
+            writeStream.once('drain', resolve);
+            writeStream.once('error', reject);
+          }
+        });
+        
         offset += data.length;
         
         if (data.length < chunkSize) break; // End of file
@@ -74,7 +86,7 @@ export class SftpClient extends EventEmitter {
     try {
       let offset = 0;
       const chunkSize = 32768; // 32KB chunks
-      const buffer = Buffer.allocUnsafe(chunkSize);
+      const buffer = Buffer.alloc(chunkSize); // Use safe allocation
       
       const fd = await fs.promises.open(localPath, 'r');
       try {
@@ -125,13 +137,19 @@ export class SftpClient extends EventEmitter {
             throw new Error(`Path exists but is not a directory: ${currentPath}`);
           }
         } catch (error: any) {
-          // Directory doesn't exist, try to create it
-          if (error.message?.includes('No such file') || error.message?.includes('not a directory')) {
+          // Use SFTP status codes instead of error message parsing
+          const isNotFound = error instanceof Error && error.name === 'SFTPError' && 
+                           (error as any).code === 2; // SFTP_STATUS.NO_SUCH_FILE
+          
+          if (isNotFound || error.message?.includes('No such file') || error.message?.includes('not a directory')) {
             try {
               await this.client.makeDirectory(currentPath);
             } catch (createError: any) {
               // Only ignore if directory was created by another process
-              if (!createError.message?.includes('File exists')) {
+              const alreadyExists = createError instanceof Error && createError.name === 'SFTPError' && 
+                                  (createError as any).code === 4; // SFTP_STATUS.FAILURE for existing dir
+              
+              if (!alreadyExists && !createError.message?.includes('File exists')) {
                 throw new Error(`Failed to create directory ${currentPath}: ${createError.message}`);
               }
             }
@@ -156,7 +174,10 @@ export class SftpClient extends EventEmitter {
           throw new Error(`Path is not a directory: ${remotePath}`);
         }
       } catch (error: any) {
-        if (error.message?.includes('No such file')) {
+        const isNotFound = error instanceof Error && error.name === 'SFTPError' && 
+                         (error as any).code === 2; // SFTP_STATUS.NO_SUCH_FILE
+        
+        if (isNotFound || error.message?.includes('No such file')) {
           return; // Directory doesn't exist, nothing to remove
         }
         throw error;
@@ -182,7 +203,10 @@ export class SftpClient extends EventEmitter {
         }
       } catch (error: any) {
         // If we can't list the directory, it might be empty or permission denied
-        if (!error.message?.includes('No such file')) {
+        const isNotFound = error instanceof Error && error.name === 'SFTPError' && 
+                         (error as any).code === 2; // SFTP_STATUS.NO_SUCH_FILE
+        
+        if (!isNotFound && !error.message?.includes('No such file')) {
           throw new Error(`Failed to list directory contents: ${error.message}`);
         }
       }
@@ -227,14 +251,25 @@ export class SftpClient extends EventEmitter {
   async append(input: string | Buffer, remotePath: string, options?: any): Promise<string> {
     if (!this.client) throw new Error('Not connected');
     
-    const handle = await this.client.openFile(remotePath, SFTP_OPEN_FLAGS.WRITE | SFTP_OPEN_FLAGS.CREAT | SFTP_OPEN_FLAGS.APPEND);
+    const data = Buffer.isBuffer(input) ? input : Buffer.from(input, 'utf8');
+    
+    // For append, we need to get current file size to know where to write
+    let fileSize = 0;
+    try {
+      const stats = await this.client.stat(remotePath);
+      fileSize = stats.size || 0;
+    } catch (error: any) {
+      // File doesn't exist, start at 0
+      if (!(error.message?.includes('No such file') || error.message?.includes('not found'))) {
+        throw error;
+      }
+    }
+    
+    const handle = await this.client.openFile(remotePath, SFTP_OPEN_FLAGS.WRITE | SFTP_OPEN_FLAGS.CREAT);
     
     try {
-      const data = Buffer.isBuffer(input) ? input : Buffer.from(input, 'utf8');
-      const stats = await this.client.stat(remotePath);
-      const offset = stats.size || 0;
-      
-      await this.client.writeFile(handle, offset, data);
+      // Write at end of file using actual file size
+      await this.client.writeFile(handle, fileSize, data);
     } finally {
       await this.client.closeFile(handle);
     }
@@ -257,17 +292,27 @@ export class SftpClient extends EventEmitter {
   async uploadDir(srcDir: string, dstDir: string, options?: { filter?: (path: string, isDirectory: boolean) => boolean }): Promise<void> {
     if (!this.client) throw new Error('Not connected');
     
-    const fs = await import('fs/promises');
-    const path = await import('path');
+    // Verify source directory exists
+    try {
+      const srcStats = await fsPromises.stat(srcDir);
+      if (!srcStats.isDirectory()) {
+        throw new Error(`Source path is not a directory: ${srcDir}`);
+      }
+    } catch (error: any) {
+      throw new Error(`Source directory not accessible: ${srcDir} - ${error.message}`);
+    }
     
     // Create destination directory if it doesn't exist
     try {
       await this.mkdir(dstDir, true);
-    } catch (error) {
-      // Directory might already exist
+    } catch (error: any) {
+      // Only ignore if directory already exists
+      if (!error.message?.includes('File exists')) {
+        throw new Error(`Failed to create destination directory: ${dstDir} - ${error.message}`);
+      }
     }
     
-    const entries = await fs.readdir(srcDir, { withFileTypes: true });
+    const entries = await fsPromises.readdir(srcDir, { withFileTypes: true });
     
     for (const entry of entries) {
       const srcPath = path.join(srcDir, entry.name);
@@ -278,10 +323,14 @@ export class SftpClient extends EventEmitter {
         continue;
       }
       
-      if (entry.isDirectory()) {
-        await this.uploadDir(srcPath, dstPath, options);
-      } else {
-        await this.put(srcPath, dstPath);
+      try {
+        if (entry.isDirectory()) {
+          await this.uploadDir(srcPath, dstPath, options);
+        } else {
+          await this.put(srcPath, dstPath);
+        }
+      } catch (error: any) {
+        throw new Error(`Failed to upload ${srcPath}: ${error.message}`);
       }
     }
   }
@@ -289,14 +338,21 @@ export class SftpClient extends EventEmitter {
   async downloadDir(srcDir: string, dstDir: string, options?: { filter?: (path: string, isDirectory: boolean) => boolean }): Promise<void> {
     if (!this.client) throw new Error('Not connected');
     
-    const fs = await import('fs/promises');
-    const path = await import('path');
+    // Verify source directory exists on remote
+    try {
+      const srcStats = await this.client.stat(srcDir);
+      if (!srcStats.isDirectory?.()) {
+        throw new Error(`Remote path is not a directory: ${srcDir}`);
+      }
+    } catch (error: any) {
+      throw new Error(`Remote directory not accessible: ${srcDir} - ${error.message}`);
+    }
     
     // Create local destination directory if it doesn't exist
     try {
-      await fs.mkdir(dstDir, { recursive: true });
-    } catch (error) {
-      // Directory might already exist
+      await fsPromises.mkdir(dstDir, { recursive: true });
+    } catch (error: any) {
+      throw new Error(`Failed to create local directory: ${dstDir} - ${error.message}`);
     }
     
     const entries = await this.client.listDirectory(srcDir);
@@ -312,10 +368,14 @@ export class SftpClient extends EventEmitter {
         continue;
       }
       
-      if (entry.attrs.isDirectory?.()) {
-        await this.downloadDir(srcPath, dstPath, options);
-      } else {
-        await this.get(srcPath, dstPath);
+      try {
+        if (entry.attrs.isDirectory?.()) {
+          await this.downloadDir(srcPath, dstPath, options);
+        } else {
+          await this.get(srcPath, dstPath);
+        }
+      } catch (error: any) {
+        throw new Error(`Failed to download ${srcPath}: ${error.message}`);
       }
     }
   }
