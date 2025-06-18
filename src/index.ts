@@ -10,6 +10,25 @@ import * as fs from 'fs';
 import * as fsPromises from 'fs/promises';
 import * as path from 'path';
 import { EventEmitter } from 'events';
+import { Readable, Writable } from 'stream';
+
+// ssh2-sftp-client compatible types
+export interface FileInfo {
+  type: 'd' | '-' | 'l';  // directory, file, or symlink
+  name: string;           // filename
+  size: number;           // file size in bytes
+  modifyTime: number;     // modification timestamp
+  accessTime: number;     // access timestamp
+  rights: {
+    user: string;         // user permissions (e.g., "rwx")
+    group: string;        // group permissions
+    other: string;        // other permissions
+  };
+  owner: number;          // owner UID
+  group: number;          // group GID
+}
+
+export type FileInfoType = 'd' | '-' | 'l';
 
 export class SftpClient extends EventEmitter {
   private client: SSH2StreamsSFTPClient | null = null;
@@ -33,18 +52,59 @@ export class SftpClient extends EventEmitter {
   }
 
   // ssh2-sftp-client compatible API methods
-  async list(remotePath: string): Promise<DirectoryEntry[]> {
+  async list(remotePath: string, filter?: (fileInfo: FileInfo) => boolean): Promise<FileInfo[]> {
     if (!this.client) throw new Error('Not connected');
-    return this.client.listDirectory(remotePath);
+    const entries = await this.client.listDirectory(remotePath);
+    
+    // Convert DirectoryEntry[] to FileInfo[] for ssh2-sftp-client compatibility
+    const fileInfos: FileInfo[] = entries.map(entry => {
+      // Determine file type
+      let type: FileInfoType = '-'; // default to file
+      if (entry.attrs.isDirectory?.()) {
+        type = 'd';
+      } else if (entry.attrs.isSymbolicLink?.()) {
+        type = 'l';
+      }
+      
+      // Parse permissions from mode
+      const mode = entry.attrs.permissions || 0;
+      const formatPermissions = (perm: number): string => {
+        const r = (perm & 4) ? 'r' : '-';
+        const w = (perm & 2) ? 'w' : '-';
+        const x = (perm & 1) ? 'x' : '-';
+        return r + w + x;
+      };
+      
+      const fileInfo: FileInfo = {
+        type,
+        name: entry.filename,
+        size: entry.attrs.size || 0,
+        modifyTime: entry.attrs.mtime || 0,
+        accessTime: entry.attrs.atime || 0,
+        rights: {
+          user: formatPermissions((mode >> 6) & 7),
+          group: formatPermissions((mode >> 3) & 7),
+          other: formatPermissions(mode & 7)
+        },
+        owner: entry.attrs.uid || 0,
+        group: entry.attrs.gid || 0
+      };
+      
+      return fileInfo;
+    });
+    
+    // Apply filter if provided
+    return filter ? fileInfos.filter(filter) : fileInfos;
   }
 
-  async get(remotePath: string, localPath: string): Promise<void> {
+  async get(remotePath: string, dst?: string | Writable): Promise<string | Writable | Buffer> {
     if (!this.client) throw new Error('Not connected');
     
     const handle = await this.client.openFile(remotePath, SFTP_OPEN_FLAGS.READ);
-    const writeStream = fs.createWriteStream(localPath);
     
     try {
+      // Read entire file into memory first
+      const chunks: Buffer[] = [];
       let offset = 0;
       const chunkSize = 32768; // 32KB chunks
       
@@ -52,55 +112,87 @@ export class SftpClient extends EventEmitter {
         const data = await this.client.readFile(handle, offset, chunkSize);
         if (!data || data.length === 0) break;
         
-        // Wait for write to complete before continuing
-        await new Promise<void>((resolve, reject) => {
-          const written = writeStream.write(data);
-          if (written) {
-            resolve();
-          } else {
-            writeStream.once('drain', resolve);
-            writeStream.once('error', reject);
-          }
-        });
-        
+        chunks.push(data);
         offset += data.length;
         
         if (data.length < chunkSize) break; // End of file
       }
       
-      writeStream.end();
-      await new Promise<void>((resolve, reject) => {
-        writeStream.on('finish', () => resolve());
-        writeStream.on('error', reject);
-      });
+      const fileBuffer = Buffer.concat(chunks);
+      
+      if (dst === undefined) {
+        // No destination specified - return Buffer
+        return fileBuffer;
+      } else if (typeof dst === 'string') {
+        // String destination - write to local file
+        await fsPromises.writeFile(dst, fileBuffer);
+        return dst;
+      } else {
+        // Writable stream destination
+        return new Promise<Writable>((resolve, reject) => {
+          dst.write(fileBuffer, (error) => {
+            if (error) {
+              reject(error);
+            } else {
+              dst.end();
+              resolve(dst);
+            }
+          });
+        });
+      }
     } finally {
       await this.client.closeFile(handle);
     }
   }
 
-  async put(localPath: string, remotePath: string): Promise<void> {
+  async put(input: string | Buffer | Readable, remotePath: string, options?: any): Promise<string> {
     if (!this.client) throw new Error('Not connected');
     
     const handle = await this.client.openFile(remotePath, SFTP_OPEN_FLAGS.WRITE | SFTP_OPEN_FLAGS.CREAT | SFTP_OPEN_FLAGS.TRUNC);
     
     try {
+      let dataBuffer: Buffer;
+      
+      if (Buffer.isBuffer(input)) {
+        // Input is already a Buffer
+        dataBuffer = input;
+      } else if (typeof input === 'string') {
+        // Input is a file path - read the file
+        dataBuffer = await fsPromises.readFile(input);
+      } else {
+        // Input is a Readable stream - collect all data
+        const chunks: Buffer[] = [];
+        
+        await new Promise<void>((resolve, reject) => {
+          input.on('data', (chunk: Buffer) => {
+            chunks.push(chunk);
+          });
+          
+          input.on('end', () => {
+            resolve();
+          });
+          
+          input.on('error', (error) => {
+            reject(error);
+          });
+        });
+        
+        dataBuffer = Buffer.concat(chunks);
+      }
+      
+      // Write data in chunks
       let offset = 0;
       const chunkSize = 32768; // 32KB chunks
-      const buffer = Buffer.alloc(chunkSize); // Use safe allocation
       
-      const fd = await fs.promises.open(localPath, 'r');
-      try {
-        while (true) {
-          const { bytesRead } = await fd.read(buffer, 0, chunkSize, offset);
-          if (bytesRead === 0) break; // End of file
-          
-          const chunk = buffer.subarray(0, bytesRead);
-          await this.client.writeFile(handle, offset, chunk);
-          offset += bytesRead;
-        }
-      } finally {
-        await fd.close();
+      while (offset < dataBuffer.length) {
+        const end = Math.min(offset + chunkSize, dataBuffer.length);
+        const chunk = dataBuffer.subarray(offset, end);
+        
+        await this.client.writeFile(handle, offset, chunk);
+        offset += chunk.length;
       }
+      
+      return remotePath;
     } finally {
       await this.client.closeFile(handle);
     }
@@ -215,12 +307,20 @@ export class SftpClient extends EventEmitter {
     return this.client.removeDirectory(remotePath);
   }
 
-  async exists(remotePath: string): Promise<boolean> {
+  async exists(remotePath: string): Promise<false | FileInfoType> {
     if (!this.client) throw new Error('Not connected');
     
     try {
-      await this.client.stat(remotePath);
-      return true;
+      const stats = await this.client.stat(remotePath);
+      
+      // Determine file type based on attributes
+      if (stats.isDirectory?.()) {
+        return 'd';
+      } else if (stats.isSymbolicLink?.()) {
+        return 'l';
+      } else {
+        return '-'; // regular file
+      }
     } catch (error) {
       return false;
     }
