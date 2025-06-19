@@ -73,9 +73,36 @@ export class SSH2StreamsTransport extends EventEmitter {
       algorithms: config.algorithms || defaultAlgorithms
     });
     
-    // Apply RSA-SHA2 proxy fix for modern SSH server compatibility
-    const { applyRevolutionaryProxyFix } = require('./revolutionary-proxy-fix');
-    this.ssh = applyRevolutionaryProxyFix(originalSSH, (msg: string) => this.emit('debug', msg));
+    // Apply RSA-SHA2 proxy fix only when needed (RSA keys with modern SSH servers)
+    let needsRSAFix = false;
+    if (config.privateKey) {
+      try {
+        // Check if this is an RSA key that might need the revolutionary fix
+        const parsedKey = ssh2Streams.utils.parseKey(config.privateKey, config.passphrase);
+        if (parsedKey) {
+          const key = Array.isArray(parsedKey) ? parsedKey[0] : parsedKey;
+          if (key && key.type === 'ssh-rsa') {
+            needsRSAFix = true;
+            this.emit('debug', 'RSA key detected - revolutionary proxy fix will be applied for modern SSH server compatibility');
+          } else {
+            this.emit('debug', `${key?.type || 'Unknown'} key detected - no RSA-SHA2 fix needed`);
+          }
+        }
+      } catch (keyCheckError) {
+        this.emit('debug', `Key type detection failed: ${keyCheckError instanceof Error ? keyCheckError.message : String(keyCheckError)} - will apply proxy as fallback`);
+        // If we can't determine the key type, apply the proxy as a safety measure
+        needsRSAFix = true;
+      }
+    } else {
+      this.emit('debug', 'Password authentication - no RSA-SHA2 fix needed');
+    }
+
+    if (needsRSAFix) {
+      const { applyRevolutionaryProxyFix } = require('./revolutionary-proxy-fix');
+      this.ssh = applyRevolutionaryProxyFix(originalSSH, (msg: string) => this.emit('debug', msg));
+    } else {
+      this.ssh = originalSSH;
+    }
 
     this.setupEventHandlers();
   }

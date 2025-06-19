@@ -382,13 +382,15 @@ await sftp.listDirectory(remotePath);                     // Alternative to list
 
 ### 🔬 Revolutionary RSA-SHA2 Technology
 
-Our library includes a **revolutionary proxy-based fix** that intercepts ssh2-streams method calls and automatically upgrades RSA authentication from legacy `ssh-rsa` to modern `rsa-sha2-256` algorithms. This breakthrough enables:
+Our library includes a **revolutionary proxy-based fix** that intelligently intercepts ssh2-streams method calls and automatically upgrades RSA authentication from legacy `ssh-rsa` to modern `rsa-sha2-256` algorithms. This breakthrough enables:
 
 - ✅ **100% RSA Key Compatibility** with modern SSH servers
 - ✅ **Zero Code Changes** required in your application  
 - ✅ **Automatic Algorithm Upgrade** from RSA-SHA1 to RSA-SHA2
 - ✅ **Enhanced Security** using modern cryptographic signatures
 - ✅ **Backward Compatibility** with legacy SSH servers
+- ✅ **Smart Application** - only applied when needed (RSA keys only)
+- ✅ **Optimal Performance** - no proxy overhead for Ed25519/ECDSA keys or password authentication
 
 ### Key Format Support
 
