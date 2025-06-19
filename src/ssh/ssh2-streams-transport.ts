@@ -67,10 +67,15 @@ export class SSH2StreamsTransport extends EventEmitter {
       compress: ['none']
     };
 
-    this.ssh = new ssh2Streams.SSH2Stream({
+    // Create SSH2Stream instance
+    const originalSSH = new ssh2Streams.SSH2Stream({
       server: false,
       algorithms: config.algorithms || defaultAlgorithms
     });
+    
+    // Apply RSA-SHA2 proxy fix for modern SSH server compatibility
+    const { applyRevolutionaryProxyFix } = require('./revolutionary-proxy-fix');
+    this.ssh = applyRevolutionaryProxyFix(originalSSH, (msg: string) => this.emit('debug', msg));
 
     this.setupEventHandlers();
   }
@@ -182,7 +187,7 @@ export class SSH2StreamsTransport extends EventEmitter {
     });
 
 
-    // Pipe socket through SSH stream
+    // Standard SSH stream piping - RSA-SHA2 fix is applied via proxy
     this.socket.pipe(this.ssh).pipe(this.socket);
   }
 
@@ -229,14 +234,49 @@ export class SSH2StreamsTransport extends EventEmitter {
         const publicKeySSH = parsedKey.getPublicSSH();
         this.emit('debug', `Public key SSH format generated: ${publicKeySSH.length} bytes`);
 
-        // Authenticate with public key
+        // Use RSA-SHA2 signature wrapper for RSA keys to ensure modern cryptographic signatures
+        let signatureCallback: (buf: Buffer, cb: (signature: Buffer) => void) => void;
+        
+        if (parsedKey.type === 'ssh-rsa') {
+          this.emit('debug', 'Using RSA-SHA2 signature wrapper');
+          
+          try {
+            const { createRSASHA2SignatureCallback } = require('./rsa-sha2-wrapper');
+            signatureCallback = createRSASHA2SignatureCallback(parsedKey, this.config.privateKey, this.config.passphrase, 'sha256');
+          } catch (wrapperError) {
+            this.emit('debug', `RSA-SHA2 wrapper failed, using original signing: ${wrapperError instanceof Error ? wrapperError.message : String(wrapperError)}`);
+            signatureCallback = (buf: Buffer, cb: (signature: Buffer) => void) => {
+              try {
+                const signature = parsedKey.sign(buf);
+                cb(signature);
+              } catch (error) {
+                throw new Error(`Signing failed: ${error instanceof Error ? error.message : String(error)}`);
+              }
+            };
+          }
+        } else {
+          // Use original signing for non-RSA keys (Ed25519, ECDSA)
+          this.emit('debug', `Using original signing for ${parsedKey.type} key`);
+          signatureCallback = (buf: Buffer, cb: (signature: Buffer) => void) => {
+            try {
+              const signature = parsedKey.sign(buf);
+              cb(signature);
+            } catch (error) {
+              throw new Error(`Signing failed: ${error instanceof Error ? error.message : String(error)}`);
+            }
+          };
+        }
+
+        // Authenticate with public key using appropriate signature method
         this.ssh.authPK(this.config.username, publicKeySSH, (buf: Buffer, cb: (signature: Buffer) => void) => {
           try {
-            const signature = parsedKey.sign(buf);
-            this.emit('debug', `Signature generated: ${signature?.length || 'undefined'} bytes`);
-            cb(signature);
+            this.emit('debug', `Generating signature for ${buf.length} bytes of challenge data`);
+            signatureCallback(buf, (signature: Buffer) => {
+              this.emit('debug', `Signature generated: ${signature?.length || 'undefined'} bytes`);
+              cb(signature);
+            });
           } catch (error) {
-            this.emit('error', new Error(`Signing failed: ${error instanceof Error ? error.message : String(error)}`));
+            this.emit('error', new Error(`Authentication signing failed: ${error instanceof Error ? error.message : String(error)}`));
           }
         });
       } catch (error) {

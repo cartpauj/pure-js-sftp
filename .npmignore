@@ -1,0 +1,37 @@
+# Source files (only dist/ should be published)
+src/
+tsconfig.json
+
+# Test files and keys
+test/
+*.test.*
+*.spec.*
+
+# Development files
+.git/
+.gitignore
+.eslintrc*
+eslint.config.*
+jest.config.*
+.editorconfig
+
+# Build artifacts
+node_modules/
+*.log
+*.tmp
+*.temp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Backup files
+*~
+*.bak
+*.orig

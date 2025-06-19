@@ -123,8 +123,7 @@ This is a **breaking change** that completely replaces the custom SSH implementa
 - Documentation files (MIGRATION.md, TESTING.md, etc.)
 
 #### **📚 Documentation Updates**
-- **README.md**: Completely rewritten for ssh2-streams implementation
-- **ALGORITHMS.md**: New comprehensive cryptographic capabilities documentation
+- **README.md**: Completely rewritten for ssh2-streams implementation with comprehensive cryptographic capabilities documentation
 - **Security warnings**: Added post-quantum algorithm limitations notice
 - **Future migration**: Guidance for post-quantum transition planning
 
