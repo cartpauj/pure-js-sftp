@@ -1,6 +1,6 @@
 // Type definitions for ssh2-streams
 declare module 'ssh2-streams' {
-  import { EventEmitter } from 'events';
+  // import { EventEmitter } from 'events';
   import { Duplex } from 'stream';
 
   export interface SSH2StreamOptions {

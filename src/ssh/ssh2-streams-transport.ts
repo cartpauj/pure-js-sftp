@@ -35,14 +35,41 @@ export class SSH2StreamsTransport extends EventEmitter {
     super();
     this.config = config;
     this.socket = new Socket();
+    // Use modern SSH algorithms compatible with OpenSSH 8.0+
+    const defaultAlgorithms = {
+      kex: [
+        'ecdh-sha2-nistp256',
+        'ecdh-sha2-nistp384', 
+        'ecdh-sha2-nistp521',
+        'diffie-hellman-group-exchange-sha256',
+        'diffie-hellman-group14-sha256',
+        'diffie-hellman-group16-sha512',
+        'diffie-hellman-group18-sha512',
+        // Fallback for ssh2-streams compatibility
+        'diffie-hellman-group14-sha1'
+      ],
+      cipher: [
+        'aes128-gcm@openssh.com',
+        'aes256-gcm@openssh.com', 
+        'aes128-ctr',
+        'aes192-ctr',
+        'aes256-ctr',
+        // Fallback ciphers
+        'aes128-cbc',
+        'aes256-cbc'
+      ],
+      hmac: [
+        'hmac-sha2-256',
+        'hmac-sha2-512',
+        // Fallback MAC for compatibility
+        'hmac-sha1'
+      ],
+      compress: ['none']
+    };
+
     this.ssh = new ssh2Streams.SSH2Stream({
       server: false,
-      algorithms: config.algorithms || {
-        kex: ['curve25519-sha256@libssh.org'],
-        cipher: ['aes128-gcm@openssh.com'],
-        hmac: ['hmac-sha2-256'],
-        compress: ['none']
-      }
+      algorithms: config.algorithms || defaultAlgorithms
     });
 
     this.setupEventHandlers();
@@ -85,11 +112,11 @@ export class SSH2StreamsTransport extends EventEmitter {
       this.emit('ready');
     });
 
-    this.ssh.on('USERAUTH_FAILURE', (methods: string[], partial: boolean) => {
+    this.ssh.on('USERAUTH_FAILURE', (methods: string[], _partial: boolean) => {
       this.emit('error', new Error(`Authentication failed. Available methods: ${methods.join(', ')}`));
     });
 
-    this.ssh.on('USERAUTH_BANNER', (message: string) => {
+    this.ssh.on('USERAUTH_BANNER', (_message: string) => {
       this.emit('debug', 'Server banner received');
     });
 
@@ -128,7 +155,7 @@ export class SSH2StreamsTransport extends EventEmitter {
     });
 
     this.ssh.on('CHANNEL_DATA:0', (data: Buffer) => {
-      this.emit('debug', `Received CHANNEL_DATA:0: ${data.length} bytes - ${data.toString('hex')}`);
+      this.emit('debug', `Received CHANNEL_DATA:0: ${data.length} bytes`);
       if (this.sftpChannel) {
         this.sftpChannel.emit('data', data);
       } else {
@@ -154,17 +181,6 @@ export class SSH2StreamsTransport extends EventEmitter {
       this.emit('close');
     });
 
-    // Debug: Listen for ALL events to see what's happening
-    const originalEmit = this.ssh.emit;
-    this.ssh.emit = function(event: string, ...args: any[]) {
-      if (event.startsWith('CHANNEL_') || event.includes('DATA')) {
-        console.log(`[SSH2-STREAMS] Event: ${event}`, args.length > 0 ? `args: ${args.length}` : '');
-        if (event.includes('DATA') && args.length > 0 && Buffer.isBuffer(args[0])) {
-          console.log(`[SSH2-STREAMS] Data: ${args[0].toString('hex')}`);
-        }
-      }
-      return originalEmit.call(this, event, ...args);
-    };
 
     // Pipe socket through SSH stream
     this.socket.pipe(this.ssh).pipe(this.socket);
@@ -178,15 +194,46 @@ export class SSH2StreamsTransport extends EventEmitter {
       this.emit('debug', 'Starting public key authentication');
       
       try {
-        // Parse the private key
-        const parsedKeys = ssh2Streams.utils.parseKey(this.config.privateKey, this.config.passphrase);
-        const parsedKey = parsedKeys[0];
+        let parsedKey: any = null;
+        
+        // First try ssh2-streams parser
+        try {
+          this.emit('debug', 'Attempting ssh2-streams key parsing');
+          const parsedKeys = ssh2Streams.utils.parseKey(this.config.privateKey, this.config.passphrase);
+          
+          // Check if parsing was successful
+          if (parsedKeys && (Array.isArray(parsedKeys) ? parsedKeys.length > 0 : true)) {
+            const key = Array.isArray(parsedKeys) ? parsedKeys[0] : parsedKeys;
+            if (key && typeof key.getPublicSSH === 'function') {
+              parsedKey = key;
+              this.emit('debug', 'ssh2-streams key parsing successful');
+            }
+          }
+        } catch (ssh2StreamsError) {
+          this.emit('debug', `ssh2-streams parsing failed: ${ssh2StreamsError instanceof Error ? ssh2StreamsError.message : String(ssh2StreamsError)}`);
+        }
+        
+        // If ssh2-streams failed, try our enhanced key parser
+        if (!parsedKey) {
+          this.emit('debug', 'Falling back to enhanced key parser');
+          const { parseKey } = require('./enhanced-key-parser');
+          parsedKey = parseKey(this.config.privateKey, this.config.passphrase);
+          
+          if (parsedKey) {
+            this.emit('debug', 'Enhanced key parsing successful');
+          } else {
+            throw new Error('Key parsing failed: Enhanced parser with sshpk fallback could not parse the provided key');
+          }
+        }
+        
         const publicKeySSH = parsedKey.getPublicSSH();
+        this.emit('debug', `Public key SSH format generated: ${publicKeySSH.length} bytes`);
 
         // Authenticate with public key
         this.ssh.authPK(this.config.username, publicKeySSH, (buf: Buffer, cb: (signature: Buffer) => void) => {
           try {
             const signature = parsedKey.sign(buf);
+            this.emit('debug', `Signature generated: ${signature?.length || 'undefined'} bytes`);
             cb(signature);
           } catch (error) {
             this.emit('error', new Error(`Signing failed: ${error instanceof Error ? error.message : String(error)}`));

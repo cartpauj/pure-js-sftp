@@ -58,6 +58,7 @@
     "typescript": "^5.8.3"
   },
   "dependencies": {
-    "ssh2-streams": "^0.4.10"
+    "ssh2-streams": "^0.4.10",
+    "sshpk": "^1.18.0"
   }
 }

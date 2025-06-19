@@ -185,19 +185,22 @@ export class SSH2StreamsSFTPClient extends EventEmitter {
           case SFTP_MSG.HANDLE:
             request.resolve(packet.payload.subarray(4)); // Skip length prefix
             break;
-          case SFTP_MSG.DATA:
+          case SFTP_MSG.DATA: {
             const dataLength = packet.payload.readUInt32BE(0);
             const data = packet.payload.subarray(4, 4 + dataLength);
             request.resolve(data);
             break;
-          case SFTP_MSG.NAME:
+          }
+          case SFTP_MSG.NAME: {
             const entries = this.parseNamePacket(packet.payload);
             request.resolve(entries);
             break;
-          case SFTP_MSG.ATTRS:
+          }
+          case SFTP_MSG.ATTRS: {
             const { attrs } = this.parseFileAttributes(packet.payload, 0);
             request.resolve(attrs);
             break;
+          }
         }
       }
     }
