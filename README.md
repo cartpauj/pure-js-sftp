@@ -99,7 +99,7 @@ async function sftpOperations() {
     
     // Check if file exists (returns: false, 'd', '-', or 'l')
     const exists = await sftp.exists('/remote/uploaded-file.txt');
-    console.log('🔍 File exists:', exists); // true/false (simplified for now)
+    console.log('🔍 File exists:', exists); // false, 'd' (directory), '-' (file), or 'l' (symlink)
     
     // Get file info
     const stats = await sftp.stat('/remote/uploaded-file.txt');
@@ -116,7 +116,7 @@ async function sftpOperations() {
 ### 2. TypeScript Usage
 
 ```typescript
-import { SSH2StreamsSFTPClient, SFTPClientOptions } from 'pure-js-sftp';
+import SftpClient, { SFTPClientOptions } from 'pure-js-sftp';
 
 // With password authentication
 const configPassword: SFTPClientOptions = {
@@ -135,13 +135,13 @@ const configKey: SFTPClientOptions = {
   port: 22
 };
 
-const sftp = new SSH2StreamsSFTPClient(configPassword);
-await sftp.connect();
+const sftp = new SftpClient();
+await sftp.connect(configPassword);
 
 // Type-safe file listing
 const files = await sftp.list('/home');
 files.forEach(file => {
-  console.log(`${file.filename} (${file.attrs.size} bytes)`);
+  console.log(`${file.name} (${file.size} bytes)`);
 });
 ```
 
@@ -337,8 +337,8 @@ await sftp.listDirectory(remotePath);                     // Alternative to list
 |--------|-------------|---------|
 | `connect(config)` | Connect to SFTP server | `Promise<void>` |
 | `end()` | Disconnect from server | `Promise<void>` |
-| `list(remotePath)` | List directory contents | `Promise<DirectoryEntry[]>` |
-| `exists(remotePath)` | Check if path exists | `Promise<boolean>` |
+| `list(remotePath, filter?)` | List directory contents | `Promise<FileInfo[]>` |
+| `exists(remotePath)` | Check if path exists | `Promise<false \| 'd' \| '-' \| 'l'>` |
 | `stat(remotePath)` | Get file/directory stats | `Promise<FileAttributes>` |
 | `get(remotePath, localPath)` | Download file | `Promise<void>` |
 | `put(localPath, remotePath)` | Upload file | `Promise<void>` |
@@ -565,13 +565,17 @@ pure-js-sftp/
 │   ├── ssh/                  # SSH transport and advanced fixes
 │   │   ├── ssh2-streams-transport.ts
 │   │   ├── revolutionary-proxy-fix.ts    # 🚀 Revolutionary RSA fix
-│   │   ├── rsa-sha2-wrapper.ts           # RSA-SHA2 cryptography
 │   │   ├── enhanced-key-parser.ts        # Advanced key parsing
-│   │   └── types.ts
-│   └── types/                # TypeScript definitions
+│   │   ├── openssh-key-parser.ts         # OpenSSH key format parser
+│   │   ├── pure-js-signing-fix.ts        # Pure JS signing compatibility
+│   │   └── types.ts                      # TypeScript definitions
+│   ├── utils/                # Shared utilities
+│   │   └── asn1-utils.ts                 # ASN.1 encoding utilities
+│   └── types/                # Additional TypeScript definitions
 │       └── ssh2-streams.d.ts
 ├── test/                     # Comprehensive test suite
-│   └── real-ssh-connection-test.js      # 22-key validation test
+│   ├── comprehensive-parser-test.js      # Key parsing validation
+│   └── vscode-pure-js-connection-test.js # VSCode compatibility test
 ├── dist/                     # Compiled JavaScript
 └── README.md                 # This file
 ```
@@ -598,8 +602,9 @@ await sftp.connect(config);
 ### Error Handling
 
 ```javascript
-import { SFTPError } from 'pure-js-sftp';
+import SftpClient, { SFTPError } from 'pure-js-sftp';
 
+const sftp = new SftpClient();
 try {
   await sftp.connect(config);
 } catch (error) {

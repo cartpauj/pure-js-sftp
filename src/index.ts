@@ -506,6 +506,11 @@ export class SftpClient extends EventEmitter {
     return this.client.readFile(handle, offset, length);
   }
 
+  async writeFile(handle: Buffer, offset: number, data: Buffer) {
+    if (!this.client) throw new Error('Not connected');
+    return this.client.writeFile(handle, offset, data);
+  }
+
   disconnect() {
     if (this.client) {
       this.client.disconnect();
@@ -527,3 +532,4 @@ export type { SSH2StreamsConfig } from './ssh/ssh2-streams-transport';
 export { SSH2StreamsSFTPClient } from './sftp/ssh2-streams-client';
 export { SSH2StreamsTransport } from './ssh/ssh2-streams-transport';
 export { enablePureJSSigningFix, disablePureJSSigningFix, isPureJSSigningFixEnabled } from './ssh/pure-js-signing-fix';
+export { SFTPError } from './ssh/types';

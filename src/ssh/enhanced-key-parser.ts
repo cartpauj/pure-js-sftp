@@ -3,7 +3,7 @@
  * Pure JavaScript parsing with real cryptographic signing
  */
 import { parseOpenSSHPrivateKey } from './openssh-key-parser';
-import { encodeLength, encodeSequence, encodeBitString } from '../utils/asn1-utils';
+import { encodeLength } from '../utils/asn1-utils';
 // Hash algorithm functions are defined inline in child process scripts
 // All crypto operations moved to child processes for pure JS compatibility
 
@@ -265,29 +265,6 @@ function buildSSHEd25519PublicKey(publicKey: Buffer): Buffer {
   return Buffer.concat([algorithmLength, algorithm, keyLength, publicKey]);
 }
 
-function extractECDSAPointFromDER_FIXED(derData: Buffer, keyType: string): Buffer {
-  // Extract ECDSA point from DER SPKI format
-  // This is a simplified extraction - looks for the BIT STRING containing the point
-  for (let i = 0; i < derData.length - 10; i++) {
-    if (derData[i] === 0x03) { // BIT STRING tag
-      const length = derData[i + 1];
-      if (length > 0x40 && length < 0x90) { // Reasonable size for ECDSA point
-        const pointStart = i + 3; // Skip tag, length, and unused bits byte
-        if (derData[pointStart] === 0x04) { // Uncompressed point format
-          // Extract the point data
-          let pointSize = 65; // Default for P-256
-          if (keyType.includes('nistp384')) pointSize = 97;
-          if (keyType.includes('nistp521')) pointSize = 133;
-          
-          return derData.subarray(pointStart, pointStart + pointSize);
-        }
-      }
-    }
-  }
-  
-  // No valid point found in DER data
-  throw new Error(`Could not extract ECDSA point from DER data for ${keyType}`);
-}
 
 function buildSSHECDSAPublicKey(publicKey: Buffer, keyType: string): Buffer {
   const algorithm = Buffer.from(keyType, 'utf8');
@@ -447,50 +424,7 @@ function extractSSHPublicKeyFromOpenSSH(keyData: string, passphrase?: string): B
 // Removed generateMinimalSSHKey - dummy keys don't work for authentication
 
 // Pure JavaScript signing implementation for VSCode compatibility
-function signWithPureJS(keyString: string, passphrase: string | undefined, data: Buffer, keyType?: string): Buffer {
-  try {
-    if (keyString.includes('BEGIN OPENSSH PRIVATE KEY')) {
-      // For OpenSSH format, try to extract private key data
-      return signWithOpenSSHKey(keyString, passphrase, data, keyType || 'ssh-rsa');
-    } else {
-      // For traditional PEM format, we can't do pure JS signing in VSCode
-      throw new Error(`Pure JavaScript signing not available for ${keyType || 'ssh-rsa'} keys - use child process signing instead`);
-    }
-  } catch (error) {
-    throw new Error(`Pure JavaScript signing failed for ${keyType || 'ssh-rsa'}: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
 
-// Sign with OpenSSH private key using pure JavaScript
-function signWithOpenSSHKey(keyString: string, passphrase: string | undefined, data: Buffer, keyType: string): Buffer {
-  try {
-    // For now, this is a placeholder that returns a valid signature format
-    // In a real implementation, this would need to:
-    // 1. Parse the OpenSSH private key
-    // 2. Decrypt if necessary using bcrypt-pbkdf
-    // 3. Extract the actual private key parameters
-    // 4. Perform the cryptographic signing operation
-    
-    // OpenSSH signing requires full cryptographic implementation
-    throw new Error(`OpenSSH signing not implemented in pure JavaScript for ${keyType}`);
-  } catch (error) {
-    throw new Error(`OpenSSH signing failed: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-
-// Pure JS OpenSSH signing - use child process approach for VSCode compatibility
-function signWithOpenSSHKeyPureJS(keyString: string, passphrase: string | undefined, data: Buffer, keyType: string): Buffer {
-  try {
-    // Convert OpenSSH key to PEM format that Node.js crypto can use in child process
-    const pemKey = convertOpenSSHToPEM(keyString, passphrase, keyType);
-    
-    // Use child process signing approach
-    return signWithSystemCrypto(pemKey, passphrase, data, keyType);
-    
-  } catch (error) {
-    throw new Error(`Pure JS OpenSSH signing failed: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
 
 // Convert decrypted RSA OpenSSH data to PKCS#1 PEM format
 function convertRSAOpenSSHToPEM(decryptedData: any): string {
@@ -726,90 +660,6 @@ try {
   }
 }
 
-// Pure JavaScript Ed25519 signing implementation
-function signEd25519PureJS(privateKeyData: Buffer, message: Buffer): Buffer {
-  // Extract the 32-byte private key from the 64-byte privateKeyData
-  // OpenSSH stores: [32-byte public key][32-byte private key] = 64 bytes total
-  const privateKey = privateKeyData.subarray(32, 64); // Last 32 bytes
-  const publicKey = privateKeyData.subarray(0, 32);   // First 32 bytes
-  
-  // For pure JS Ed25519, we need to implement the signing algorithm
-  // This is a simplified implementation - in production you'd use a proper Ed25519 library
-  
-  // For now, create a deterministic signature based on private key and message
-  // that follows Ed25519 signature format (64 bytes)
-  const signature = Buffer.alloc(64);
-  
-  // Mix private key and message to create deterministic signature
-  for (let i = 0; i < 32; i++) {
-    signature[i] = privateKey[i] ^ message[i % message.length];
-  }
-  for (let i = 32; i < 64; i++) {
-    signature[i] = publicKey[i - 32] ^ message[i % message.length];
-  }
-  
-  // Add some entropy from message hash
-  let hash = 0;
-  for (let i = 0; i < message.length; i++) {
-    hash = ((hash << 5) - hash + message[i]) & 0xffffffff;
-  }
-  
-  for (let i = 0; i < 64; i++) {
-    signature[i] ^= (hash >>> (i % 32)) & 0xff;
-  }
-  
-  return signature;
-}
-
-// Pure JavaScript ECDSA signing implementation  
-function signECDSAPureJS(privateKeyData: Buffer, message: Buffer, keyType: string): Buffer {
-  // Parse ECDSA private key data
-  // OpenSSH format: [curve_name][public_key][private_key]
-  let offset = 0;
-  
-  // Read curve name
-  const curveLength = privateKeyData.readUInt32BE(offset);
-  offset += 4;
-  const curveName = privateKeyData.subarray(offset, offset + curveLength).toString();
-  offset += curveLength;
-  
-  // Read public key
-  const pubLength = privateKeyData.readUInt32BE(offset);
-  offset += 4;
-  const publicKey = privateKeyData.subarray(offset, offset + pubLength);
-  offset += pubLength;
-  
-  // Read private key
-  const privLength = privateKeyData.readUInt32BE(offset);
-  offset += 4;
-  const privateKey = privateKeyData.subarray(offset, offset + privLength);
-  
-  // Determine signature size based on curve
-  let sigSize = 64; // Default for P-256
-  if (keyType.includes('nistp384')) sigSize = 96;
-  if (keyType.includes('nistp521')) sigSize = 132;
-  
-  const halfSize = sigSize / 2;
-  
-  // Create deterministic r and s values (simplified ECDSA)
-  const r = Buffer.alloc(halfSize);
-  const s = Buffer.alloc(halfSize);
-  
-  // Mix private key and message for deterministic signing
-  for (let i = 0; i < halfSize; i++) {
-    r[i] = privateKey[i % privateKey.length] ^ message[i % message.length];
-    s[i] = publicKey[i % publicKey.length] ^ message[(i + halfSize) % message.length];
-  }
-  
-  // Encode as SSH wire format: string(r) + string(s)
-  function writeSSHBuffer(buf: Buffer): Buffer {
-    const len = Buffer.alloc(4);
-    len.writeUInt32BE(buf.length, 0);
-    return Buffer.concat([len, buf]);
-  }
-  
-  return Buffer.concat([writeSSHBuffer(r), writeSSHBuffer(s)]);
-}
 
 // Removed signRSAPureJS - dummy signatures don't work for authentication
 

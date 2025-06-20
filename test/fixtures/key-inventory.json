@@ -1,0 +1,193 @@
+{
+  "keys": [
+    {
+      "name": "rsa_2048_no_pass",
+      "type": "rsa",
+      "bits": 2048,
+      "format": "pkcs1",
+      "encrypted": false,
+      "expectedSshType": "ssh-rsa"
+    },
+    {
+      "name": "rsa_2048_with_pass",
+      "type": "rsa", 
+      "bits": 2048,
+      "format": "pkcs1",
+      "encrypted": true,
+      "expectedSshType": "ssh-rsa"
+    },
+    {
+      "name": "rsa_3072_no_pass",
+      "type": "rsa",
+      "bits": 3072,
+      "format": "pkcs1", 
+      "encrypted": false,
+      "expectedSshType": "ssh-rsa"
+    },
+    {
+      "name": "rsa_3072_with_pass",
+      "type": "rsa",
+      "bits": 3072,
+      "format": "pkcs1",
+      "encrypted": true,
+      "expectedSshType": "ssh-rsa"
+    },
+    {
+      "name": "rsa_4096_no_pass",
+      "type": "rsa",
+      "bits": 4096,
+      "format": "pkcs1",
+      "encrypted": false,
+      "expectedSshType": "ssh-rsa"
+    },
+    {
+      "name": "rsa_4096_with_pass",
+      "type": "rsa",
+      "bits": 4096,
+      "format": "pkcs1",
+      "encrypted": true,
+      "expectedSshType": "ssh-rsa"
+    },
+    {
+      "name": "rsa_2048_pkcs8_no_pass",
+      "type": "rsa",
+      "bits": 2048,
+      "format": "pkcs8",
+      "encrypted": false,
+      "expectedSshType": "ssh-rsa"
+    },
+    {
+      "name": "rsa_3072_pkcs8_encrypted",
+      "type": "rsa",
+      "bits": 3072,
+      "format": "pkcs8",
+      "encrypted": true,
+      "expectedSshType": "ssh-rsa"
+    },
+    {
+      "name": "rsa_openssh_no_pass",
+      "type": "rsa",
+      "bits": 2048,
+      "format": "openssh",
+      "encrypted": false,
+      "expectedSshType": "ssh-rsa"
+    },
+    {
+      "name": "rsa_openssh_with_pass",
+      "type": "rsa",
+      "bits": 2048,
+      "format": "openssh",
+      "encrypted": true,
+      "expectedSshType": "ssh-rsa"
+    },
+    {
+      "name": "rsa_openssh_aes256_ctr",
+      "type": "rsa",
+      "bits": 2048,
+      "format": "openssh",
+      "encrypted": true,
+      "cipher": "aes256-ctr",
+      "kdf": "bcrypt",
+      "expectedSshType": "ssh-rsa",
+      "description": "Problematic key format from PPK conversion"
+    },
+    {
+      "name": "rsa_pem_no_pass",
+      "type": "rsa",
+      "bits": 2048,
+      "format": "pem",
+      "encrypted": false,
+      "expectedSshType": "ssh-rsa"
+    },
+    {
+      "name": "rsa_pem_with_pass",
+      "type": "rsa",
+      "bits": 2048,
+      "format": "pem",
+      "encrypted": true,
+      "expectedSshType": "ssh-rsa"
+    },
+    {
+      "name": "ed25519_no_pass",
+      "type": "ed25519",
+      "format": "openssh",
+      "encrypted": false,
+      "expectedSshType": "ssh-ed25519"
+    },
+    {
+      "name": "ed25519_with_pass",
+      "type": "ed25519",
+      "format": "openssh",
+      "encrypted": true,
+      "expectedSshType": "ssh-ed25519"
+    },
+    {
+      "name": "ed25519_openssh_no_pass",
+      "type": "ed25519",
+      "format": "openssh",
+      "encrypted": false,
+      "expectedSshType": "ssh-ed25519"
+    },
+    {
+      "name": "ed25519_openssh_with_pass",
+      "type": "ed25519",
+      "format": "openssh",
+      "encrypted": true,
+      "expectedSshType": "ssh-ed25519"
+    },
+    {
+      "name": "ecdsa_256_no_pass",
+      "type": "ecdsa",
+      "bits": 256,
+      "curve": "nistp256",
+      "format": "openssh",
+      "encrypted": false,
+      "expectedSshType": "ecdsa-sha2-nistp256"
+    },
+    {
+      "name": "ecdsa_256_with_pass",
+      "type": "ecdsa",
+      "bits": 256,
+      "curve": "nistp256",
+      "format": "openssh",
+      "encrypted": true,
+      "expectedSshType": "ecdsa-sha2-nistp256"
+    },
+    {
+      "name": "ecdsa_384_no_pass",
+      "type": "ecdsa",
+      "bits": 384,
+      "curve": "nistp384",
+      "format": "openssh",
+      "encrypted": false,
+      "expectedSshType": "ecdsa-sha2-nistp384"
+    },
+    {
+      "name": "ecdsa_384_with_pass",
+      "type": "ecdsa",
+      "bits": 384,
+      "curve": "nistp384",
+      "format": "openssh",
+      "encrypted": true,
+      "expectedSshType": "ecdsa-sha2-nistp384"
+    },
+    {
+      "name": "ecdsa_521_no_pass",
+      "type": "ecdsa",
+      "bits": 521,
+      "curve": "nistp521",
+      "format": "openssh",
+      "encrypted": false,
+      "expectedSshType": "ecdsa-sha2-nistp521"
+    },
+    {
+      "name": "ecdsa_521_with_pass",
+      "type": "ecdsa",
+      "bits": 521,
+      "curve": "nistp521",
+      "format": "openssh",
+      "encrypted": true,
+      "expectedSshType": "ecdsa-sha2-nistp521"
+    }
+  ]
+}

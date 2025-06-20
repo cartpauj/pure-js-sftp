@@ -21,31 +21,3 @@ export function encodeLength(length: number): Buffer {
     return Buffer.from([0x80 | lengthBytes.length, ...lengthBytes]);
   }
 }
-
-/**
- * Create ASN.1 SEQUENCE with proper length encoding
- * @param content The content to wrap in a SEQUENCE
- * @returns Buffer containing the ASN.1 SEQUENCE
- */
-export function encodeSequence(content: Buffer): Buffer {
-  return Buffer.concat([
-    Buffer.from([0x30]), // SEQUENCE tag
-    encodeLength(content.length),
-    content
-  ]);
-}
-
-/**
- * Create ASN.1 BIT STRING with proper length encoding
- * @param data The bit string data
- * @param unusedBits Number of unused bits in the last byte (default 0)
- * @returns Buffer containing the ASN.1 BIT STRING
- */
-export function encodeBitString(data: Buffer, unusedBits: number = 0): Buffer {
-  const content = Buffer.concat([Buffer.from([unusedBits]), data]);
-  return Buffer.concat([
-    Buffer.from([0x03]), // BIT STRING tag
-    encodeLength(content.length),
-    content
-  ]);
-}

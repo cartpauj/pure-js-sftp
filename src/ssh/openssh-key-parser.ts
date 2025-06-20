@@ -6,85 +6,6 @@
 // Pure JavaScript OpenSSH parser - no direct crypto imports
 
 // Implement bcrypt-pbkdf using child process with correct API
-function deriveBcryptPbkdfWithChildProcess(passphrase: string, salt: Buffer, rounds: number, keyLength: number): Buffer {
-  const fs = require('fs');
-  const { execSync } = require('child_process');
-  const tempFilename = '/tmp/bcrypt_pbkdf_' + Math.random().toString(36).substring(7) + '.js';
-  
-  // Get the full path to bcrypt-pbkdf to ensure child process can find it
-  const bcryptPbkdfPath = require.resolve('bcrypt-pbkdf');
-  
-  // Use actual bcrypt-pbkdf library with correct API
-  const derivationScript = `
-try {
-    const bcryptPbkdf = require('${bcryptPbkdfPath}');
-    const input = JSON.parse(process.argv[2]);
-    const { passphrase, salt, rounds, keyLength: requestedKeyLength } = input;
-    
-    const saltBuffer = Buffer.from(salt, 'base64');
-    
-    // Convert to Uint8Array as required by bcrypt-pbkdf API
-    const passUint8 = new Uint8Array(Buffer.from(passphrase, 'utf8'));
-    const saltUint8 = new Uint8Array(saltBuffer);
-    const keyUint8 = new Uint8Array(requestedKeyLength);
-    
-    // Correct API: pbkdf(pass, passlen, salt, saltlen, key, keylen, rounds)
-    const result = bcryptPbkdf.pbkdf(
-        passUint8, passUint8.length,
-        saltUint8, saltUint8.length,
-        keyUint8, keyUint8.length,
-        rounds
-    );
-    
-    if (result !== 0) {
-        throw new Error('bcrypt-pbkdf failed with result: ' + result);
-    }
-    
-    // Convert back to Buffer
-    const derivedKey = Buffer.from(keyUint8);
-    
-    process.stdout.write(JSON.stringify({ 
-      success: true, 
-      derivedKey: derivedKey.toString('base64'),
-      method: 'actual-bcrypt-pbkdf',
-      keyLength: derivedKey.length
-    }));
-    
-} catch (error) {
-    process.stderr.write('BCRYPT_PBKDF_ERROR: ' + error.message);
-    process.exit(1);
-}`;
-  
-  try {
-    fs.writeFileSync(tempFilename, derivationScript);
-    
-    const input = JSON.stringify({
-      passphrase: passphrase,
-      salt: salt.toString('base64'),
-      rounds: rounds,
-      keyLength: keyLength
-    });
-    
-    const result = execSync(`node ${tempFilename} ${JSON.stringify(input)}`, {
-      encoding: 'utf8',
-      stdio: 'pipe'
-    });
-    
-    fs.unlinkSync(tempFilename);
-    
-    const parsed = JSON.parse(result.trim());
-    if (parsed.success) {
-      return Buffer.from(parsed.derivedKey, 'base64');
-    } else {
-      throw new Error('Key derivation failed');
-    }
-    
-  } catch (error) {
-    try { fs.unlinkSync(tempFilename); } catch {}
-    // Return null if child process fails - pure JS mode cannot do bcrypt-pbkdf
-    throw new Error('bcrypt-pbkdf is required for encrypted OpenSSH keys and child process failed');
-  }
-}
 
 interface OpenSSHKeyData {
   keyType: string;
@@ -245,15 +166,27 @@ try {
   
   // Derive key using bcrypt-pbkdf
   const keyIvLength = getCipherKeyLength(cipherName) + getCipherIvLength(cipherName);
-  const derivedKey = bcryptPbkdf.pbkdf(passphrase, saltBuffer, rounds, keyIvLength);
+  const passphraseBuffer = Buffer.from(passphrase, 'utf8');
+  const derivedKey = Buffer.alloc(keyIvLength);
   
-  // Ensure derivedKey is a Buffer
-  const keyBuffer = Buffer.isBuffer(derivedKey) ? derivedKey : Buffer.from(derivedKey);
+  // bcrypt-pbkdf v1.0.2 API: bcrypt_pbkdf(pass, passlen, salt, saltlen, key, keylen, rounds)
+  const result = bcryptPbkdf.pbkdf(
+    passphraseBuffer,           // pass
+    passphraseBuffer.length,    // passlen
+    saltBuffer,                 // salt
+    saltBuffer.length,          // saltlen
+    derivedKey,                 // key (output buffer)
+    derivedKey.length,          // keylen
+    rounds                      // rounds
+  );
+  if (result !== 0) {
+    throw new Error('bcrypt-pbkdf key derivation failed with code: ' + result);
+  }
   
   const keyLength = getCipherKeyLength(cipherName);
   const ivLength = getCipherIvLength(cipherName);
-  const key = keyBuffer.subarray(0, keyLength);
-  const iv = keyBuffer.subarray(keyLength, keyLength + ivLength);
+  const key = derivedKey.subarray(0, keyLength);
+  const iv = derivedKey.subarray(keyLength, keyLength + ivLength);
   
   // Decrypt
   const decipher = crypto.createDecipheriv(getCipherAlgorithm(cipherName), key, iv);
