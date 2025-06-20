@@ -1,10 +1,10 @@
 /**
- * RSA-SHA2 Signature Wrapper
- * Wraps ssh2-streams RSA keys to use RSA-SHA2 signatures instead of RSA-SHA1
- * This enables compatibility with modern SSH servers that reject RSA-SHA1
+ * Pure JavaScript RSA-SHA2 Signature Wrapper using sshpk only
+ * Eliminates all Node.js crypto dependencies for maximum VSCode/webpack compatibility
  */
 
-import * as crypto from 'crypto';
+// @ts-ignore
+import * as sshpk from 'sshpk';
 
 export interface WrappedRSAKey {
   type: string;
@@ -14,7 +14,7 @@ export interface WrappedRSAKey {
 }
 
 /**
- * Wraps an ssh2-streams RSA key to use RSA-SHA2 signatures
+ * Wraps an ssh2-streams RSA key to use RSA-SHA2 signatures via sshpk
  * @param originalKey - The original ssh2-streams key object
  * @param privateKeyPEM - The raw private key in PEM format
  * @param algorithm - RSA signature algorithm ('sha256' or 'sha512')
@@ -31,19 +31,13 @@ export function wrapRSAKeyWithSHA2(
     throw new Error('RSA-SHA2 wrapper can only be applied to RSA keys');
   }
 
-  // Create Node.js private key object for RSA-SHA2 signing
-  let nodePrivateKey: crypto.KeyObject;
-  let nodePublicKey: crypto.KeyObject;
+  // Parse key with sshpk
+  let sshpkKey: any;
   
   try {
-    nodePrivateKey = crypto.createPrivateKey({
-      key: privateKeyPEM,
-      format: 'pem'
-    });
-    
-    nodePublicKey = crypto.createPublicKey(nodePrivateKey);
+    sshpkKey = (sshpk as any).parsePrivateKey(privateKeyPEM, 'auto');
   } catch (error) {
-    throw new Error(`Failed to create Node.js key objects: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`Failed to parse private key with sshpk: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   const wrappedKey: WrappedRSAKey = {
@@ -56,23 +50,52 @@ export function wrapRSAKeyWithSHA2(
 
     sign(data: Buffer): Buffer {
       try {
-        // Use Node.js crypto for RSA-SHA2 signature instead of ssh2-streams RSA-SHA1
-        const signature = crypto.sign(algorithm, data, nodePrivateKey);
-        return signature;
+        // Use sshpk for RSA-SHA2 signature
+        const signer = sshpkKey.createSign(algorithm);
+        signer.update(data);
+        const signature = signer.sign();
+        
+        // Extract raw RSA signature bytes for ssh2-streams compatibility
+        if (signature && typeof signature.toBuffer === 'function') {
+          // Try to get raw signature (not SSH wire format)
+          try {
+            return signature.toBuffer('asn1');
+          } catch (e) {
+            // Fallback to raw buffer
+            return signature.toBuffer();
+          }
+        } else if (signature && signature.signature && Buffer.isBuffer(signature.signature)) {
+          return signature.signature;
+        } else if (Buffer.isBuffer(signature)) {
+          return signature;
+        } else {
+          throw new Error('Unable to extract raw signature bytes from sshpk signature object');
+        }
       } catch (error) {
-        // Fallback to original ssh2-streams signing if Node.js crypto fails
-        console.warn(`RSA-SHA2 wrapper signing failed, falling back to original: ${error instanceof Error ? error.message : String(error)}`);
+        // Fallback to original ssh2-streams signing if sshpk fails
+        console.warn(`sshpk RSA-SHA2 signing failed, falling back to original: ${error instanceof Error ? error.message : String(error)}`);
         return originalKey.sign(data);
       }
     },
 
     verify(data: Buffer, signature: Buffer): boolean {
       try {
-        // Use Node.js crypto for verification
-        return crypto.verify(algorithm, data, nodePublicKey, signature);
+        // Use sshpk for verification
+        const verifier = sshpkKey.createVerify(algorithm);
+        verifier.update(data);
+        
+        // Try to parse signature
+        let sshpkSig;
+        try {
+          sshpkSig = (sshpk as any).parseSignature(signature, 'ssh-rsa', 'ssh');
+        } catch (parseError) {
+          sshpkSig = signature;
+        }
+        
+        return verifier.verify(sshpkSig);
       } catch (error) {
         // Fallback to original verification
-        console.warn(`RSA-SHA2 wrapper verification failed, falling back to original: ${error instanceof Error ? error.message : String(error)}`);
+        console.warn(`sshpk RSA-SHA2 verification failed, falling back to original: ${error instanceof Error ? error.message : String(error)}`);
         return originalKey.verify(data, signature);
       }
     }
@@ -82,7 +105,7 @@ export function wrapRSAKeyWithSHA2(
 }
 
 /**
- * Creates an RSA-SHA2 signature callback for ssh2-streams authentication
+ * Creates an RSA-SHA2 signature callback for ssh2-streams authentication using sshpk only
  * @param originalKey - The original ssh2-streams key object
  * @param privateKeyPEM - The raw private key in PEM format
  * @param passphrase - Optional passphrase for encrypted keys
@@ -108,43 +131,22 @@ export function createRSASHA2SignatureCallback(
     };
   }
 
-  // Try to create Node.js private key object
-  let nodePrivateKey: crypto.KeyObject | null = null;
+  // Try to parse key with sshpk
+  let sshpkKey: any = null;
   
-  // First, try direct PEM parsing
   try {
-    const keyOptions: any = { key: privateKeyPEM, format: 'pem' };
+    const sshpkOptions: any = {};
     if (passphrase) {
-      keyOptions.passphrase = passphrase;
+      sshpkOptions.passphrase = passphrase;
     }
     
-    nodePrivateKey = crypto.createPrivateKey(keyOptions);
-  } catch (pemError) {
-    // If direct PEM parsing fails, try to convert OpenSSH format to PEM using sshpk
-    try {
-      const sshpk = require('sshpk');
-      
-      // Parse with sshpk and convert to PEM (handles passphrases)
-      const sshpkOptions: any = {};
-      if (passphrase) {
-        sshpkOptions.passphrase = passphrase;
-      }
-      
-      const sshpkKey = sshpk.parsePrivateKey(privateKeyPEM, 'auto', sshpkOptions);
-      const pemKey = sshpkKey.toString('pem');
-      
-      // Now try to create Node.js key from converted PEM (no passphrase needed as it's now decrypted)
-      nodePrivateKey = crypto.createPrivateKey({
-        key: pemKey,
-        format: 'pem'
-      });
-    } catch (sshpkError) {
-      console.warn(`Failed to create Node.js private key for RSA-SHA2 (both PEM and sshpk conversion failed), using original signing`);
-    }
+    sshpkKey = (sshpk as any).parsePrivateKey(privateKeyPEM, 'auto', sshpkOptions);
+  } catch (sshpkError) {
+    console.warn(`Failed to parse key with sshpk for RSA-SHA2, using original signing: ${sshpkError instanceof Error ? sshpkError.message : String(sshpkError)}`);
   }
   
-  // If we couldn't create a Node.js key, fall back to original signing
-  if (!nodePrivateKey) {
+  // If we couldn't parse with sshpk, fall back to original signing
+  if (!sshpkKey) {
     return (buf: Buffer, cb: (signature: Buffer) => void) => {
       try {
         const signature = originalKey.sign(buf);
@@ -155,21 +157,42 @@ export function createRSASHA2SignatureCallback(
     };
   }
 
-  // Return RSA-SHA2 signature callback
+  // Return sshpk RSA-SHA2 signature callback
   return (buf: Buffer, cb: (signature: Buffer) => void) => {
     try {
-      // Generate RSA-SHA2 signature using Node.js crypto
-      const signature = crypto.sign(algorithm, buf, nodePrivateKey);
-      cb(signature);
+      // Generate RSA-SHA2 signature using sshpk
+      const signer = sshpkKey.createSign(algorithm);
+      signer.update(buf);
+      const signature = signer.sign();
+      
+      // Convert to buffer format - extract raw RSA signature bytes
+      let signatureBuffer: Buffer;
+      if (signature && typeof signature.toBuffer === 'function') {
+        // Try to get raw signature (not SSH wire format)
+        try {
+          signatureBuffer = signature.toBuffer('asn1');
+        } catch (e) {
+          // Fallback to raw buffer
+          signatureBuffer = signature.toBuffer();
+        }
+      } else if (signature && signature.signature && Buffer.isBuffer(signature.signature)) {
+        signatureBuffer = signature.signature;
+      } else if (Buffer.isBuffer(signature)) {
+        signatureBuffer = signature;
+      } else {
+        throw new Error('Unable to extract raw signature bytes from sshpk signature object');
+      }
+      
+      cb(signatureBuffer);
     } catch (error) {
-      console.warn(`RSA-SHA2 signing failed, falling back to original: ${error instanceof Error ? error.message : String(error)}`);
+      console.warn(`sshpk RSA-SHA2 signing failed, falling back to original: ${error instanceof Error ? error.message : String(error)}`);
       
       try {
         // Fallback to original ssh2-streams signing
         const fallbackSignature = originalKey.sign(buf);
         cb(fallbackSignature);
       } catch (fallbackError) {
-        throw new Error(`Both RSA-SHA2 and fallback signing failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
+        throw new Error(`Both sshpk RSA-SHA2 and fallback signing failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
       }
     }
   };

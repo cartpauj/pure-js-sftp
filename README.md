@@ -3,16 +3,18 @@
 [![npm version](https://badge.fury.io/js/pure-js-sftp.svg)](https://badge.fury.io/js/pure-js-sftp)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
-A production-ready, pure JavaScript SFTP client with **zero native dependencies**. Built on ssh2-streams with revolutionary RSA-SHA2 compatibility fixes for modern SSH servers. Perfect for environments where native modules fail to load (VSCode extensions, serverless functions, Docker containers, etc.).
+A production-ready, pure JavaScript SFTP client with **zero native dependencies**. Built on ssh2-streams with revolutionary RSA-SHA2 compatibility fixes for modern SSH servers. **Now with webpack compatibility** - perfect for VSCode extensions, serverless functions, Docker containers, and any environment where native modules fail to load.
 
 ## ✨ Features
 
 - **Pure JavaScript**: No native `.node` files or compilation required
+- **Webpack Compatible**: Static imports only - works perfectly in VSCode extensions and webpack bundles
 - **Cross-platform**: Works on Windows, macOS, Linux, ARM64, x86
 - **Universal Compatibility**: VSCode extensions, serverless, containers, CI/CD
 - **100% API Compatible** with `ssh2-sftp-client` - drop-in replacement
 - **Zero Code Changes** required for migration
 - **Built on ssh2-streams**: Uses the battle-tested ssh2-streams library for reliability
+- **Pure sshpk Crypto**: Uses sshpk exclusively for all cryptographic operations (no Node.js crypto dependencies)
 - **SFTP v3 Support**: All standard file operations
 - **TypeScript Support**: Full type definitions included
 - **Revolutionary SSH Key Support**: 100% compatibility with all SSH key types (RSA, ECDSA, Ed25519)

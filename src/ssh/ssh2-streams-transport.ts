@@ -1,6 +1,9 @@
 import { EventEmitter } from 'events';
 import { Socket } from 'net';
 import * as ssh2Streams from 'ssh2-streams';
+import { applyRevolutionaryProxyFix } from './revolutionary-proxy-fix';
+import { parseKey } from './enhanced-key-parser';
+import { createRSASHA2SignatureCallback } from './rsa-sha2-wrapper';
 
 export interface SSH2StreamsConfig {
   host: string;
@@ -98,7 +101,6 @@ export class SSH2StreamsTransport extends EventEmitter {
     }
 
     if (needsRSAFix) {
-      const { applyRevolutionaryProxyFix } = require('./revolutionary-proxy-fix');
       this.ssh = applyRevolutionaryProxyFix(originalSSH, (msg: string) => this.emit('debug', msg));
     } else {
       this.ssh = originalSSH;
@@ -248,7 +250,6 @@ export class SSH2StreamsTransport extends EventEmitter {
         // If ssh2-streams failed, try our enhanced key parser
         if (!parsedKey) {
           this.emit('debug', 'Falling back to enhanced key parser');
-          const { parseKey } = require('./enhanced-key-parser');
           parsedKey = parseKey(this.config.privateKey, this.config.passphrase);
           
           if (parsedKey) {
@@ -268,8 +269,7 @@ export class SSH2StreamsTransport extends EventEmitter {
           this.emit('debug', 'Using RSA-SHA2 signature wrapper');
           
           try {
-            const { createRSASHA2SignatureCallback } = require('./rsa-sha2-wrapper');
-            signatureCallback = createRSASHA2SignatureCallback(parsedKey, this.config.privateKey, this.config.passphrase, 'sha256');
+            signatureCallback = createRSASHA2SignatureCallback(parsedKey, this.config.privateKey as string, this.config.passphrase, 'sha256');
           } catch (wrapperError) {
             this.emit('debug', `RSA-SHA2 wrapper failed, using original signing: ${wrapperError instanceof Error ? wrapperError.message : String(wrapperError)}`);
             signatureCallback = (buf: Buffer, cb: (signature: Buffer) => void) => {
