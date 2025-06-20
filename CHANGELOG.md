@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [4.0.1] - 2025-06-20
+
+### Fixed
+- Removed all references to sshpk dependency for clarity
+- Updated documentation to reflect pure JavaScript implementation
+
 ## [4.0.0] - 2025-06-20
 
 ### 🚀 **MAJOR RELEASE: Universal SSH Key Compatibility & Dynamic Test Architecture**
@@ -24,21 +30,21 @@ This major release delivers **revolutionary improvements** in SSH key support, t
 
 #### **🔧 VSCode Extension Compatibility**
 - **Static Imports Only**: Eliminated all dynamic `require()` calls that broke webpack static analysis
-- **Pure sshpk Implementation**: Removed Node.js crypto dependencies for maximum browser/webpack compatibility
-- **Enhanced Key Parser**: Uses `sshpk` exclusively for all cryptographic operations
+- **Pure JavaScript Implementation**: Removed Node.js crypto dependencies for maximum browser/webpack compatibility
+- **Enhanced Key Parser**: Uses pure JavaScript for all cryptographic operations
 - **RSA-SHA2 Wrapper**: Pure JavaScript RSA-SHA2 signature generation without Node.js crypto
 
 #### **🛠️ Technical Breakthroughs**
 - **Fixed Import Issues**: Replaced `require('./enhanced-key-parser')` with static `import` statements
 - **Webpack Bundling**: All dependencies now statically analyzable by webpack
 - **Signature Format Fix**: Corrected RSA signature format for ssh2-streams compatibility using `signature.toBuffer('asn1')`
-- **Cross-Platform Crypto**: Uses sshpk's cross-platform cryptographic implementations
+- **Cross-Platform Crypto**: Uses pure JavaScript cross-platform cryptographic implementations
 - **Key Generation Pipeline**: Enhanced test key generation with comprehensive format coverage
 
 #### **🧪 Validation Results**
 - **25/25 Keys Working**: All SSH key types maintain 100% success rate with pure JavaScript
 - **VSCode Extension Ready**: No webpack bundling issues with static imports
-- **RSA-SHA2 Support**: Modern RSA signatures work perfectly with sshpk
+- **RSA-SHA2 Support**: Modern RSA signatures work perfectly with pure JavaScript
 - **Ed25519/ECDSA Native**: Non-RSA keys continue to work with optimal performance
 - **Real Server Testing**: All keys validated against localhost OpenSSH server
 
@@ -67,20 +73,20 @@ This major release establishes **pure-js-sftp** as the most comprehensive pure J
 
 #### **🔧 VSCode Extension Compatibility**
 - **Static Imports Only**: Eliminated all dynamic `require()` calls that broke webpack static analysis
-- **Pure sshpk Implementation**: Removed Node.js crypto dependencies for maximum browser/webpack compatibility
-- **Enhanced Key Parser**: Uses `sshpk` exclusively for all cryptographic operations
+- **Pure JavaScript Implementation**: Removed Node.js crypto dependencies for maximum browser/webpack compatibility
+- **Enhanced Key Parser**: Uses pure JavaScript for all cryptographic operations
 - **RSA-SHA2 Wrapper**: Pure JavaScript RSA-SHA2 signature generation without Node.js crypto
 
 #### **🛠️ Technical Improvements**
 - **Fixed Import Issues**: Replaced `require('./enhanced-key-parser')` with static `import` statements
 - **Webpack Bundling**: All dependencies now statically analyzable by webpack
 - **Signature Format Fix**: Corrected RSA signature format for ssh2-streams compatibility using `signature.toBuffer('asn1')`
-- **Cross-Platform Crypto**: Uses sshpk's cross-platform cryptographic implementations
+- **Cross-Platform Crypto**: Uses pure JavaScript cross-platform cryptographic implementations
 
 #### **🧪 Validation Results**
 - **22/22 Keys Working**: All SSH key types maintain 100% success rate with pure JavaScript
 - **VSCode Extension Ready**: No webpack bundling issues with static imports
-- **RSA-SHA2 Support**: Modern RSA signatures work perfectly with sshpk
+- **RSA-SHA2 Support**: Modern RSA signatures work perfectly with pure JavaScript
 - **Ed25519/ECDSA Native**: Non-RSA keys continue to work with optimal performance
 
 #### **📦 Build System**
@@ -138,8 +144,8 @@ This is a **major breakthrough release** that achieves 100% SSH key compatibilit
 - **🛡️ Enhanced Security**: Modern RSA-SHA2 cryptographic signatures replace legacy RSA-SHA1
 
 #### **🔬 Technical Breakthroughs**
-- **RSA-SHA2 Signature Wrapper**: Generates modern cryptographic signatures using Node.js crypto and sshpk
-- **Enhanced Key Parser**: 100% success rate with sshpk fallback for comprehensive SSH key format support
+- **RSA-SHA2 Signature Wrapper**: Generates modern cryptographic signatures using pure JavaScript crypto
+- **Enhanced Key Parser**: 100% success rate with pure JavaScript fallback for comprehensive SSH key format support
 - **Real SSH Server Validation**: Tested against OpenSSH server with all 22 key types achieving 100% success
 - **Advanced Algorithm Detection**: Automatic detection and upgrade of RSA keys to modern algorithms
 

@@ -284,7 +284,7 @@ function testKey(keyInfo) {
         if (message.includes('VSCode') || 
             message.includes('enhanced fallback') ||
             message.includes('DETECTED') ||
-            message.includes('sshpk failed')) {
+            message.includes('key parsing failed')) {
           result.vscodeActivated = true;
         }
         

@@ -14,7 +14,7 @@ A production-ready, pure JavaScript SFTP client with **zero native dependencies*
 - **100% API Compatible** with `ssh2-sftp-client` - drop-in replacement
 - **Zero Code Changes** required for migration
 - **Built on ssh2-streams**: Uses the battle-tested ssh2-streams library for reliability
-- **Pure sshpk Crypto**: Uses sshpk exclusively for all cryptographic operations (no Node.js crypto dependencies)
+- **Pure JavaScript Crypto**: Uses pure JavaScript for all cryptographic operations (no Node.js crypto dependencies)
 - **SFTP v3 Support**: All standard file operations
 - **TypeScript Support**: Full type definitions included
 - **Revolutionary SSH Key Support**: 100% compatibility with all SSH key types (RSA, ECDSA, Ed25519)
@@ -476,7 +476,7 @@ await sftp.connect({
 - **API Layer**: ssh2-sftp-client compatible interface
 - **SFTP Protocol**: Complete SFTP v3 implementation
 - **🚀 Revolutionary Proxy Fix**: JavaScript Proxy that intercepts ssh2-streams calls and upgrades RSA algorithms
-- **Enhanced Key Parser**: 100% SSH key parsing with sshpk fallback support
+- **Enhanced Key Parser**: 100% SSH key parsing with pure JavaScript fallback support
 - **ssh2-streams**: Battle-tested SSH transport layer (pure JavaScript)
 - **Node.js Built-ins**: Leverages Node.js crypto, net, and stream modules
 
@@ -705,4 +705,4 @@ This breakthrough enables millions of existing Node.js applications to work with
 - OpenSSH project for the SSH/SFTP protocol standards
 - Node.js team for the excellent built-in crypto and networking modules
 - ssh2-sftp-client project for API inspiration and compatibility requirements
-- sshpk project for comprehensive SSH key parsing capabilities
+- The open source community for comprehensive SSH key parsing capabilities
