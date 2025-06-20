@@ -5,6 +5,9 @@
  * and modify RSA key algorithm names from "ssh-rsa" to "rsa-sha2-256" at runtime.
  * This enables RSA key authentication with modern SSH servers without modifying
  * the ssh2-streams library.
+ * 
+ * Note: This fix is ONLY for RSA keys. ECDSA and Ed25519 keys work fine with
+ * standard ssh2-streams and should NOT use this proxy.
  */
 
 export function applyRevolutionaryProxyFix(ssh2Stream: any, debugFn?: (msg: string) => void): any {
@@ -19,13 +22,14 @@ export function applyRevolutionaryProxyFix(ssh2Stream: any, debugFn?: (msg: stri
       
       // Intercept the authPK method which handles public key authentication
       if (prop === 'authPK' && typeof originalValue === 'function') {
-        debug('Intercepting authPK method for RSA-SHA2 fix');
+        debug('Intercepting authPK method for RSA-SHA2 compatibility fix');
         
         return function(username: string, pubKey: any, cbSign: Function) {
           let modifiedPubKey = pubKey;
           
+          
           if (pubKey && pubKey.type === 'ssh-rsa') {
-            // Case 1: Key object with .type property - modify the type
+            // Case 1: RSA Key object with .type property - modify the type
             debug('Modifying RSA key object: ssh-rsa -> rsa-sha2-256');
             modifiedPubKey = {
               ...pubKey,
@@ -35,7 +39,7 @@ export function applyRevolutionaryProxyFix(ssh2Stream: any, debugFn?: (msg: stri
             };
             
           } else if (Buffer.isBuffer(pubKey)) {
-            // Case 2: Buffer containing SSH public key - check if it's RSA
+            // Case 2: Buffer containing SSH public key - check type
             const keyTypeStart = 4; // Skip length prefix
             const keyTypeLen = pubKey.readUInt32BE(0);
             const keyType = pubKey.toString('ascii', keyTypeStart, keyTypeStart + keyTypeLen);
@@ -58,7 +62,7 @@ export function applyRevolutionaryProxyFix(ssh2Stream: any, debugFn?: (msg: stri
           // Create signature callback that passes through to the original
           const signatureCallback = (buf: Buffer, cb: (signature: Buffer) => void) => {
             cbSign(buf, (signature: Buffer) => {
-              debug('RSA-SHA2 authentication complete');
+              debug('Revolutionary RSA-SHA2 fix authentication complete');
               cb(signature);
             });
           };

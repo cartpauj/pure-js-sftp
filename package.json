@@ -9,9 +9,9 @@
     "dev": "tsc --watch",
     "lint": "ESLINT_USE_FLAT_CONFIG=false eslint src/**/*.ts",
     "lint:fix": "ESLINT_USE_FLAT_CONFIG=false eslint src/**/*.ts --fix",
-    "test": "npm run build && node test/comprehensive-parser-test.js && node test/real-ssh-connection-test.js",
+    "test": "npm run build && node test/comprehensive-parser-test.js && node test/vscode-pure-js-connection-test.js",
     "test:parser": "npm run build && node test/comprehensive-parser-test.js",
-    "test:real": "npm run build && node test/real-ssh-connection-test.js",
+    "test:vscode": "npm run build && node test/vscode-pure-js-connection-test.js",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -64,7 +64,7 @@
     "typescript": "^5.8.3"
   },
   "dependencies": {
-    "ssh2-streams": "^0.4.10",
-    "sshpk": "^1.18.0"
+    "bcrypt-pbkdf": "^1.0.2",
+    "ssh2-streams": "^0.4.10"
   }
 }

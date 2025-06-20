@@ -526,3 +526,4 @@ export type { SFTPClientOptions } from './sftp/ssh2-streams-client';
 export type { SSH2StreamsConfig } from './ssh/ssh2-streams-transport';
 export { SSH2StreamsSFTPClient } from './sftp/ssh2-streams-client';
 export { SSH2StreamsTransport } from './ssh/ssh2-streams-transport';
+export { enablePureJSSigningFix, disablePureJSSigningFix, isPureJSSigningFixEnabled } from './ssh/pure-js-signing-fix';

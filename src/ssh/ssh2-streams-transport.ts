@@ -3,7 +3,7 @@ import { Socket } from 'net';
 import * as ssh2Streams from 'ssh2-streams';
 import { applyRevolutionaryProxyFix } from './revolutionary-proxy-fix';
 import { parseKey } from './enhanced-key-parser';
-import { createRSASHA2SignatureCallback } from './rsa-sha2-wrapper';
+import { enablePureJSSigningFix } from './pure-js-signing-fix';
 
 export interface SSH2StreamsConfig {
   host: string;
@@ -34,10 +34,62 @@ export class SSH2StreamsTransport extends EventEmitter {
   private sftpChannel: SFTPChannel | null = null;
   private pendingChannels = new Map<number, (err?: Error, channel?: any) => void>();
 
+  private isOpenSSHRSAKey(keyString: string): boolean {
+    try {
+      const lines = keyString.split('\n');
+      const base64Data = lines
+        .filter(line => !line.startsWith('-----'))
+        .join('')
+        .replace(/\s/g, '');
+      
+      const keyBuffer = Buffer.from(base64Data, 'base64');
+      let offset = 0;
+      
+      // Skip magic bytes "openssh-key-v1\0"
+      offset += 15;
+      
+      // Skip cipher name
+      const cipherNameLength = keyBuffer.readUInt32BE(offset);
+      offset += 4;
+      offset += cipherNameLength;
+      
+      // Skip KDF name
+      const kdfNameLength = keyBuffer.readUInt32BE(offset);
+      offset += 4;
+      offset += kdfNameLength;
+      
+      // Skip KDF options
+      const kdfOptionsLength = keyBuffer.readUInt32BE(offset);
+      offset += 4;
+      offset += kdfOptionsLength;
+      
+      // Skip number of keys
+      offset += 4;
+      
+      // Read public key section
+      const publicKeyLength = keyBuffer.readUInt32BE(offset);
+      offset += 4;
+      const publicKeyData = keyBuffer.subarray(offset, offset + publicKeyLength);
+      
+      // Parse the public key to determine type
+      let pubOffset = 0;
+      const keyTypeLength = publicKeyData.readUInt32BE(pubOffset);
+      pubOffset += 4;
+      const keyTypeName = publicKeyData.subarray(pubOffset, pubOffset + keyTypeLength).toString();
+      
+      return keyTypeName === 'ssh-rsa';
+    } catch (error) {
+      return false;
+    }
+  }
+
   constructor(config: SSH2StreamsConfig) {
     super();
     this.config = config;
     this.socket = new Socket();
+    
+    // Enable pure JS signing fix for broader compatibility
+    enablePureJSSigningFix();
     // Use modern SSH algorithms compatible with OpenSSH 8.0+
     const defaultAlgorithms = {
       kex: [
@@ -86,23 +138,37 @@ export class SSH2StreamsTransport extends EventEmitter {
           const key = Array.isArray(parsedKey) ? parsedKey[0] : parsedKey;
           if (key && key.type === 'ssh-rsa') {
             needsRSAFix = true;
-            this.emit('debug', 'RSA key detected - revolutionary proxy fix will be applied for modern SSH server compatibility');
+            this.emit('debug', 'RSA key detected via ssh2-streams - revolutionary proxy fix will be applied for modern SSH server compatibility');
           } else {
             this.emit('debug', `${key?.type || 'Unknown'} key detected - no RSA-SHA2 fix needed`);
           }
         }
       } catch (keyCheckError) {
-        this.emit('debug', `Key type detection failed: ${keyCheckError instanceof Error ? keyCheckError.message : String(keyCheckError)} - will apply proxy as fallback`);
-        // If we can't determine the key type, apply the proxy as a safety measure
-        needsRSAFix = true;
+        this.emit('debug', `ssh2-streams key detection failed: ${keyCheckError instanceof Error ? keyCheckError.message : String(keyCheckError)}`);
+        
+        // If ssh2-streams fails, check if it's an RSA key by looking at the key content
+        if (typeof config.privateKey === 'string') {
+          if (config.privateKey.includes('BEGIN RSA PRIVATE KEY') || 
+              config.privateKey.includes('ssh-rsa') ||
+              (config.privateKey.includes('BEGIN OPENSSH PRIVATE KEY') && this.isOpenSSHRSAKey(config.privateKey))) {
+            needsRSAFix = true;
+            this.emit('debug', 'RSA key detected via content analysis - revolutionary proxy fix will be applied as fallback');
+          } else {
+            this.emit('debug', 'Non-RSA key detected via content analysis - no proxy needed');
+          }
+        }
       }
     } else {
       this.emit('debug', 'Password authentication - no RSA-SHA2 fix needed');
     }
 
     if (needsRSAFix) {
+      // Apply revolutionary proxy fix for ALL RSA keys (both OpenSSH and PKCS#1)
+      this.emit('debug', 'RSA key detected - using revolutionary proxy fix for RSA-SHA2 compatibility');
       this.ssh = applyRevolutionaryProxyFix(originalSSH, (msg: string) => this.emit('debug', msg));
     } else {
+      // No RSA-SHA2 fix needed for non-RSA keys (ECDSA, Ed25519, etc.)
+      this.emit('debug', 'Non-RSA key detected - using standard ssh2-streams');
       this.ssh = originalSSH;
     }
 
@@ -230,69 +296,31 @@ export class SSH2StreamsTransport extends EventEmitter {
       try {
         let parsedKey: any = null;
         
-        // First try ssh2-streams parser
-        try {
-          this.emit('debug', 'Attempting ssh2-streams key parsing');
-          const parsedKeys = ssh2Streams.utils.parseKey(this.config.privateKey, this.config.passphrase);
-          
-          // Check if parsing was successful
-          if (parsedKeys && (Array.isArray(parsedKeys) ? parsedKeys.length > 0 : true)) {
-            const key = Array.isArray(parsedKeys) ? parsedKeys[0] : parsedKeys;
-            if (key && typeof key.getPublicSSH === 'function') {
-              parsedKey = key;
-              this.emit('debug', 'ssh2-streams key parsing successful');
-            }
-          }
-        } catch (ssh2StreamsError) {
-          this.emit('debug', `ssh2-streams parsing failed: ${ssh2StreamsError instanceof Error ? ssh2StreamsError.message : String(ssh2StreamsError)}`);
-        }
+        // Use enhanced key parser exclusively (pure JavaScript)
+        this.emit('debug', 'Using pure JavaScript key parser (no dependencies)');
+        parsedKey = parseKey(this.config.privateKey, this.config.passphrase);
         
-        // If ssh2-streams failed, try our enhanced key parser
-        if (!parsedKey) {
-          this.emit('debug', 'Falling back to enhanced key parser');
-          parsedKey = parseKey(this.config.privateKey, this.config.passphrase);
-          
-          if (parsedKey) {
-            this.emit('debug', 'Enhanced key parsing successful');
-          } else {
-            throw new Error('Key parsing failed: Enhanced parser with sshpk fallback could not parse the provided key');
-          }
+        if (parsedKey) {
+          this.emit('debug', 'Pure JavaScript key parsing successful');
+        } else {
+          throw new Error('Key parsing failed: Pure JavaScript parser could not parse the provided key');
         }
         
         const publicKeySSH = parsedKey.getPublicSSH();
         this.emit('debug', `Public key SSH format generated: ${publicKeySSH.length} bytes`);
 
-        // Use RSA-SHA2 signature wrapper for RSA keys to ensure modern cryptographic signatures
-        let signatureCallback: (buf: Buffer, cb: (signature: Buffer) => void) => void;
-        
-        if (parsedKey.type === 'ssh-rsa') {
-          this.emit('debug', 'Using RSA-SHA2 signature wrapper');
-          
+        // Pure JS signing fix handles all key types including RSA-SHA2
+        this.emit('debug', `Using pure JS signing for ${parsedKey.type} key`);
+        const signatureCallback = (buf: Buffer, cb: (signature: Buffer) => void) => {
           try {
-            signatureCallback = createRSASHA2SignatureCallback(parsedKey, this.config.privateKey as string, this.config.passphrase, 'sha256');
-          } catch (wrapperError) {
-            this.emit('debug', `RSA-SHA2 wrapper failed, using original signing: ${wrapperError instanceof Error ? wrapperError.message : String(wrapperError)}`);
-            signatureCallback = (buf: Buffer, cb: (signature: Buffer) => void) => {
-              try {
-                const signature = parsedKey.sign(buf);
-                cb(signature);
-              } catch (error) {
-                throw new Error(`Signing failed: ${error instanceof Error ? error.message : String(error)}`);
-              }
-            };
+            // For RSA keys, use rsa-sha2-256 algorithm to match revolutionary proxy expectations
+            const algorithm = (parsedKey.type === 'ssh-rsa') ? 'rsa-sha2-256' : undefined;
+            const signature = parsedKey.sign(buf, algorithm);
+            cb(signature);
+          } catch (error) {
+            throw new Error(`Pure JS signing failed: ${error instanceof Error ? error.message : String(error)}`);
           }
-        } else {
-          // Use original signing for non-RSA keys (Ed25519, ECDSA)
-          this.emit('debug', `Using original signing for ${parsedKey.type} key`);
-          signatureCallback = (buf: Buffer, cb: (signature: Buffer) => void) => {
-            try {
-              const signature = parsedKey.sign(buf);
-              cb(signature);
-            } catch (error) {
-              throw new Error(`Signing failed: ${error instanceof Error ? error.message : String(error)}`);
-            }
-          };
-        }
+        };
 
         // Authenticate with public key using appropriate signature method
         this.ssh.authPK(this.config.username, publicKeySSH, (buf: Buffer, cb: (signature: Buffer) => void) => {
