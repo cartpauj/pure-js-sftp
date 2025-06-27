@@ -8,7 +8,40 @@ import { SFTP_MSG, SFTP_VERSION, SFTP_STATUS, SFTP_OPEN_FLAGS, SFTP_ATTR, SFTPPa
 
 export type { DirectoryEntry, FileAttributes } from '../ssh/types';
 
-export interface SFTPClientOptions extends SSH2StreamsConfig {}
+// Connection keepalive configuration
+export interface KeepaliveConfig {
+  enabled: boolean;         // Enable SSH-level keepalive (default: false)
+  interval?: number;        // Keepalive interval in ms (default: 30000)
+  maxMissed?: number;       // Max missed keepalives before disconnect (default: 3)
+}
+
+// Health check configuration
+export interface HealthCheckConfig {
+  enabled: boolean;         // Enable connection health monitoring (default: false)
+  method?: 'ping' | 'realpath'; // Health check method (default: 'realpath')
+  interval?: number;        // Health check interval in ms (default: 60000)
+}
+
+// Auto-reconnect configuration
+export interface AutoReconnectConfig {
+  enabled: boolean;         // Enable automatic reconnection (default: false)
+  maxAttempts?: number;     // Max reconnection attempts (default: 3)
+  delay?: number;           // Initial delay between attempts in ms (default: 1000)
+  backoff?: number;         // Backoff multiplier (default: 2)
+}
+
+export interface SFTPClientOptions extends SSH2StreamsConfig {
+  // Timeout configurations
+  connectTimeout?: number;    // Connection timeout in ms (default: 30000)
+  operationTimeout?: number;  // General operation timeout in ms (default: 30000)
+  chunkTimeout?: number;      // Chunk write timeout in ms (default: 30000) - optimized for 32KB chunks
+  gracefulTimeout?: number;   // Graceful disconnect timeout in ms (default: 3000)
+  
+  // Connection keepalive and health check configurations
+  keepalive?: KeepaliveConfig;
+  healthCheck?: HealthCheckConfig;
+  autoReconnect?: AutoReconnectConfig;
+}
 
 export class SSH2StreamsSFTPClient extends EventEmitter {
   private transport: SSH2StreamsTransport;
@@ -21,11 +54,72 @@ export class SSH2StreamsSFTPClient extends EventEmitter {
     type: string;
   }>();
   private dataBuffer: Buffer = Buffer.alloc(0);
+  private config: SFTPClientOptions;
+  
+  // Operation limit tracking for automatic reconnection
+  private operationCount: number = 0;
+  private bytesTransferred: number = 0;
+  private detectedOperationLimit: number | null = null;
+  private detectedDataLimit: number | null = null;
+  private lastLimitDetectionTime: number = 0;
+  
+  // Keepalive and health check state
+  private keepaliveTimer: NodeJS.Timeout | null = null;
+  private healthCheckTimer: NodeJS.Timeout | null = null;
+  private missedKeepalives = 0;
+  private isHealthy = true;
+  private reconnectAttempts = 0;
+  private reconnecting = false;
+  private lastReconnectError: Error | null = null;
+  private originalConnect: () => Promise<void>;
 
   constructor(options: SFTPClientOptions) {
     super();
+    this.validateConfig(options);
+    this.config = options;
     this.transport = new SSH2StreamsTransport(options);
     this.setupTransportHandlers();
+    
+    // Store original connect method for auto-reconnect
+    this.originalConnect = this.connect.bind(this);
+  }
+
+  /**
+   * Validate configuration options
+   */
+  private validateConfig(options: SFTPClientOptions): void {
+    // Validate keepalive configuration
+    if (options.keepalive?.enabled) {
+      if (options.keepalive.interval !== undefined && options.keepalive.interval < 1000) {
+        throw new Error('Keepalive interval must be >= 1000ms');
+      }
+      if (options.keepalive.maxMissed !== undefined && options.keepalive.maxMissed < 1) {
+        throw new Error('Keepalive maxMissed must be >= 1');
+      }
+    }
+    
+    // Validate health check configuration
+    if (options.healthCheck?.enabled) {
+      if (options.healthCheck.interval !== undefined && options.healthCheck.interval < 1000) {
+        throw new Error('Health check interval must be >= 1000ms');
+      }
+      if (options.healthCheck.method && !['ping', 'realpath'].includes(options.healthCheck.method)) {
+        throw new Error('Health check method must be "ping" or "realpath"');
+      }
+    }
+    
+    // Validate auto-reconnect configuration
+    if (options.autoReconnect?.enabled) {
+      if (options.autoReconnect.maxAttempts !== undefined && options.autoReconnect.maxAttempts < 1) {
+        throw new Error('Auto-reconnect maxAttempts must be >= 1');
+      }
+      if (options.autoReconnect.delay !== undefined && options.autoReconnect.delay < 100) {
+        throw new Error('Auto-reconnect delay must be >= 100ms');
+      }
+      if (options.autoReconnect.backoff !== undefined && options.autoReconnect.backoff < 1) {
+        throw new Error('Auto-reconnect backoff must be >= 1');
+      }
+    }
   }
 
   private setupTransportHandlers(): void {
@@ -39,7 +133,16 @@ export class SSH2StreamsSFTPClient extends EventEmitter {
 
     this.transport.on('close', () => {
       this.ready = false;
-      this.emit('close');
+      this.isHealthy = false;
+      this.stopKeepalive();
+      this.stopHealthCheck();
+      
+      // Attempt auto-reconnect if enabled and not already reconnecting
+      if (this.config.autoReconnect?.enabled && !this.reconnecting) {
+        this.attemptReconnect();
+      } else {
+        this.emit('close');
+      }
     });
 
     this.transport.on('debug', (msg) => {
@@ -68,10 +171,23 @@ export class SSH2StreamsSFTPClient extends EventEmitter {
       await this.initializeSFTP();
       
       this.ready = true;
+      this.reconnectAttempts = 0; // Reset reconnect attempts on successful connection
+      this.resetOperationCounters(); // Reset operation limits tracking on new connection
+      
+      // Start keepalive and health checks
+      this.startKeepalive();
+      this.startHealthCheck();
+      
       this.emit('ready');
       
     } catch (error) {
       this.emit('error', error);
+      
+      // Attempt auto-reconnect if enabled
+      if (this.config.autoReconnect?.enabled && !this.reconnecting) {
+        this.attemptReconnect();
+      }
+      
       throw error;
     }
   }
@@ -100,9 +216,10 @@ export class SSH2StreamsSFTPClient extends EventEmitter {
     }
 
     return new Promise((resolve, reject) => {
+      const initTimeout = this.config?.connectTimeout ?? 30000;
       const timeout = setTimeout(() => {
-        reject(new Error('SFTP initialization timeout'));
-      }, 10000);
+        reject(new Error(`SFTP initialization timeout after ${initTimeout}ms`));
+      }, initTimeout);
 
       // Listen for SFTP VERSION response
       const handleVersion = (packet: SFTPPacket) => {
@@ -178,6 +295,11 @@ export class SSH2StreamsSFTPClient extends EventEmitter {
       if (request) {
         this.pendingRequests.delete(packet.id);
         
+        // Clear timeout if it exists
+        if ((request as any).timeout) {
+          clearTimeout((request as any).timeout);
+        }
+        
         switch (packet.type) {
           case SFTP_MSG.STATUS:
             this.handleStatusPacket(packet, request);
@@ -252,8 +374,10 @@ export class SSH2StreamsSFTPClient extends EventEmitter {
     let bytesRead = 4;
 
     if (flags & SFTP_ATTR.SIZE) {
-      const size64 = buffer.readBigUInt64BE(offset + bytesRead);
-      attrs.size = Number(size64); // Handle 64-bit file sizes correctly
+      // Read 64-bit size as two 32-bit values for better compatibility
+      const sizeHigh = buffer.readUInt32BE(offset + bytesRead);
+      const sizeLow = buffer.readUInt32BE(offset + bytesRead + 4);
+      attrs.size = sizeHigh * 0x100000000 + sizeLow;
       bytesRead += 8;
     }
     if (flags & SFTP_ATTR.UIDGID) {
@@ -295,31 +419,56 @@ export class SSH2StreamsSFTPClient extends EventEmitter {
     return { attrs: attrs as FileAttributes, bytesRead };
   }
 
-  private sendSFTPRequest(type: SFTP_MSG, payload: Buffer, expectResponse = true): Promise<any> {
+  private sendSFTPRequest(type: SFTP_MSG, payload: Buffer, expectResponse = true, timeoutMs?: number): Promise<any> {
     if (!this.sftpChannel) {
       throw new Error('SFTP channel not available');
     }
 
+    const actualTimeout = timeoutMs ?? this.config?.operationTimeout ?? 30000;
+    
     return new Promise((resolve, reject) => {
       const id = ++this.requestId;
       
       if (expectResponse) {
-        this.pendingRequests.set(id, { resolve, reject, type: SFTP_MSG[type] });
+        const request = { resolve, reject, type: SFTP_MSG[type] };
+        this.pendingRequests.set(id, request);
+        
+        // Add timeout for operations that might hang
+        const timeout = setTimeout(() => {
+          this.pendingRequests.delete(id);
+          reject(new Error(`SFTP request timeout after ${actualTimeout}ms for ${SFTP_MSG[type]} (id: ${id})`));
+        }, actualTimeout);
+        
+        // Store timeout with request for cleanup
+        (request as any).timeout = timeout;
       }
 
-      // Build SFTP packet
-      const idBuffer = Buffer.allocUnsafe(4);
-      idBuffer.writeUInt32BE(id, 0);
+      try {
+        // Build SFTP packet
+        const idBuffer = Buffer.allocUnsafe(4);
+        idBuffer.writeUInt32BE(id, 0);
 
-      const packetPayload = Buffer.concat([Buffer.from([type]), idBuffer, payload]);
-      const lengthBuffer = Buffer.allocUnsafe(4);
-      lengthBuffer.writeUInt32BE(packetPayload.length, 0);
+        const packetPayload = Buffer.concat([Buffer.from([type]), idBuffer, payload]);
+        const lengthBuffer = Buffer.allocUnsafe(4);
+        lengthBuffer.writeUInt32BE(packetPayload.length, 0);
 
-      const packet = Buffer.concat([lengthBuffer, packetPayload]);
-      this.sftpChannel!.write(packet);
+        const packet = Buffer.concat([lengthBuffer, packetPayload]);
+        
+        // Write packet to SFTP channel
+        this.sftpChannel!.write(packet);
 
-      if (!expectResponse) {
-        resolve(undefined);
+        if (!expectResponse) {
+          resolve(undefined);
+        }
+      } catch (error) {
+        if (expectResponse) {
+          const request = this.pendingRequests.get(id);
+          if (request && (request as any).timeout) {
+            clearTimeout((request as any).timeout);
+          }
+          this.pendingRequests.delete(id);
+        }
+        reject(error);
       }
     });
   }
@@ -343,30 +492,83 @@ export class SSH2StreamsSFTPClient extends EventEmitter {
   }
 
   /**
+   * Sync/flush a file to disk (forces write)
+   */
+  async syncFile(handle: Buffer): Promise<void> {
+    try {
+      // Try to use fsync@openssh.com extension first
+      const extensionName = Buffer.from('fsync@openssh.com', 'utf8');
+      const extensionNameLength = Buffer.allocUnsafe(4);
+      extensionNameLength.writeUInt32BE(extensionName.length, 0);
+      
+      const handleLength = Buffer.allocUnsafe(4);
+      handleLength.writeUInt32BE(handle.length, 0);
+      
+      const payload = Buffer.concat([extensionNameLength, extensionName, handleLength, handle]);
+      
+      await this.sendSFTPRequest(SFTP_MSG.EXTENDED, payload);
+      this.emit('debug', 'File synced using fsync@openssh.com extension');
+    } catch (error) {
+      // If fsync extension fails, fall back to a small delay
+      this.emit('debug', 'fsync extension not supported, using delay fallback');
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+  }
+
+  /**
    * Close a file
    */
   async closeFile(handle: Buffer): Promise<void> {
     const handleLength = Buffer.allocUnsafe(4);
     handleLength.writeUInt32BE(handle.length, 0);
     const payload = Buffer.concat([handleLength, handle]);
-    return this.sendSFTPRequest(SFTP_MSG.CLOSE, payload);
+    // Use adaptive timeout for control operations
+    const controlTimeout = this.transport.getAdaptiveTimeout('control');
+    return this.sendSFTPRequest(SFTP_MSG.CLOSE, payload, true, controlTimeout);
   }
 
   /**
    * Read file data
    */
-  async readFile(handle: Buffer, offset: number, length: number): Promise<Buffer> {
+  async readFile(handle: Buffer, offset: number, length: number, timeoutMs?: number): Promise<Buffer> {
     const handleLength = Buffer.allocUnsafe(4);
     handleLength.writeUInt32BE(handle.length, 0);
 
-    const offsetBuffer = Buffer.allocUnsafe(8);
-    offsetBuffer.writeBigUInt64BE(BigInt(offset), 0); // Use consistent 64-bit handling
+    // Use consistent 32-bit offset handling
+    const offsetHigh = Buffer.allocUnsafe(4);
+    const offsetLow = Buffer.allocUnsafe(4);
+    offsetHigh.writeUInt32BE(Math.floor(offset / 0x100000000), 0);
+    offsetLow.writeUInt32BE(offset & 0xFFFFFFFF, 0);
 
     const lengthBuffer = Buffer.allocUnsafe(4);
     lengthBuffer.writeUInt32BE(length, 0);
 
-    const payload = Buffer.concat([handleLength, handle, offsetBuffer, lengthBuffer]);
-    return this.sendSFTPRequest(SFTP_MSG.READ, payload);
+    const payload = Buffer.concat([handleLength, handle, offsetHigh, offsetLow, lengthBuffer]);
+    
+    // Add debug info for read operations  
+    const totalPacketSize = 4 + 1 + 4 + 4 + handle.length + 8 + 4;
+    this.emit('debug', `SFTP READ: offset=${offset}, requestSize=${length}, handleSize=${handle.length}, totalPacketSize=${totalPacketSize}`);
+    
+    // Track operation before sending request
+    this.trackOperation(0, 'READ'); // Will track bytes when response arrives
+    
+    try {
+      const result = await this.sendSFTPRequest(SFTP_MSG.READ, payload, true, timeoutMs);
+      
+      // Track actual bytes received
+      if (result && result.length > 0) {
+        this.bytesTransferred += result.length; // Update byte count with actual data received
+        this.emit('debug', `READ completed: received ${result.length} bytes (total: ${(this.bytesTransferred/(1024*1024)).toFixed(2)}MB)`);
+      }
+      
+      return result;
+    } catch (error) {
+      // If this was a timeout, record it as a potential server limit
+      if (error instanceof Error && error.message.includes('timeout')) {
+        this.recordServerLimit(this.operationCount, this.bytesTransferred);
+      }
+      throw error;
+    }
   }
 
   /**
@@ -424,18 +626,27 @@ export class SSH2StreamsSFTPClient extends EventEmitter {
   /**
    * Write data to a file handle
    */
-  async writeFile(handle: Buffer, offset: number, data: Buffer): Promise<void> {
+  async writeFile(handle: Buffer, offset: number, data: Buffer, timeoutMs?: number): Promise<void> {
+    // Build SFTP WRITE packet according to RFC 4251/4252
     const handleLength = Buffer.allocUnsafe(4);
     handleLength.writeUInt32BE(handle.length, 0);
     
-    const offsetBuffer = Buffer.allocUnsafe(8);
-    offsetBuffer.writeBigUInt64BE(BigInt(offset), 0);
+    // Use 32-bit offset for better compatibility (most files are < 4GB)
+    const offsetHigh = Buffer.allocUnsafe(4);
+    const offsetLow = Buffer.allocUnsafe(4);
+    offsetHigh.writeUInt32BE(Math.floor(offset / 0x100000000), 0);
+    offsetLow.writeUInt32BE(offset & 0xFFFFFFFF, 0);
     
     const dataLength = Buffer.allocUnsafe(4);
     dataLength.writeUInt32BE(data.length, 0);
     
-    const payload = Buffer.concat([handleLength, handle, offsetBuffer, dataLength, data]);
-    return this.sendSFTPRequest(SFTP_MSG.WRITE, payload);
+    const payload = Buffer.concat([handleLength, handle, offsetHigh, offsetLow, dataLength, data]);
+    
+    // Add debug info for write operations
+    const totalPacketSize = 4 + 1 + 4 + 4 + handle.length + 8 + 4 + data.length;
+    this.emit('debug', `SFTP WRITE: offset=${offset}, dataSize=${data.length}, handleSize=${handle.length}, totalPacketSize=${totalPacketSize}`);
+    
+    return this.sendSFTPRequest(SFTP_MSG.WRITE, payload, true, timeoutMs);
   }
 
   /**
@@ -510,9 +721,11 @@ export class SSH2StreamsSFTPClient extends EventEmitter {
     // Order matters! Follow RFC: size, uid/gid, permissions, atime/mtime
     if (attrs.size !== undefined) {
       flags |= SFTP_ATTR.SIZE;
-      const sizeBuffer = Buffer.allocUnsafe(8);
-      sizeBuffer.writeBigUInt64BE(BigInt(attrs.size), 0);
-      attrData = Buffer.concat([attrData, sizeBuffer]);
+      const sizeHigh = Buffer.allocUnsafe(4);
+      const sizeLow = Buffer.allocUnsafe(4);
+      sizeHigh.writeUInt32BE(Math.floor(attrs.size / 0x100000000), 0);
+      sizeLow.writeUInt32BE(attrs.size & 0xFFFFFFFF, 0);
+      attrData = Buffer.concat([attrData, sizeHigh, sizeLow]);
     }
     
     if (attrs.uid !== undefined && attrs.gid !== undefined) {
@@ -570,6 +783,15 @@ export class SSH2StreamsSFTPClient extends EventEmitter {
    */
   disconnect(): void {
     this.ready = false;
+    this.isHealthy = false;
+    this.reconnecting = false;
+    this.reconnectAttempts = 0;
+    this.lastReconnectError = null;
+    
+    this.stopKeepalive();
+    this.stopHealthCheck();
+    this.cleanupPendingRequests();
+    
     if (this.sftpChannel) {
       this.sftpChannel.end();
     }
@@ -577,9 +799,334 @@ export class SSH2StreamsSFTPClient extends EventEmitter {
   }
 
   /**
+   * Start SSH keepalive timer
+   */
+  private startKeepalive(): void {
+    if (!this.config.keepalive?.enabled) return;
+    
+    const interval = this.config.keepalive.interval ?? 30000;
+    
+    this.keepaliveTimer = setInterval(() => {
+      this.sendKeepalive();
+    }, interval);
+    
+    this.emit('debug', `Keepalive started with ${interval}ms interval`);
+  }
+  
+  /**
+   * Stop SSH keepalive timer
+   */
+  private stopKeepalive(): void {
+    if (this.keepaliveTimer) {
+      clearInterval(this.keepaliveTimer);
+      this.keepaliveTimer = null;
+      this.missedKeepalives = 0;
+      this.emit('debug', 'Keepalive stopped');
+    }
+  }
+  
+  /**
+   * Send SSH keepalive (ping)
+   */
+  private async sendKeepalive(): Promise<void> {
+    if (!this.ready || !this.transport.isConnected()) {
+      return;
+    }
+    
+    try {
+      // Use SSH ping functionality from transport layer
+      await this.transport.ping();
+      this.missedKeepalives = 0;
+      this.emit('keepalive', { type: 'ping', success: true });
+    } catch (err) {
+      this.missedKeepalives++;
+      const maxMissed = this.config.keepalive?.maxMissed ?? 3;
+      
+      this.emit('keepalive', { type: 'ping', success: false, missed: this.missedKeepalives });
+      this.emit('debug', `Keepalive failed: ${this.missedKeepalives}/${maxMissed}`);
+      
+      if (this.missedKeepalives >= maxMissed) {
+        this.emit('debug', 'Max keepalive failures reached, disconnecting');
+        this.isHealthy = false;
+        this.disconnect();
+      }
+    }
+  }
+  
+  /**
+   * Start health check timer
+   */
+  private startHealthCheck(): void {
+    if (!this.config.healthCheck?.enabled) return;
+    
+    const interval = this.config.healthCheck.interval ?? 60000;
+    
+    this.healthCheckTimer = setInterval(() => {
+      this.performHealthCheck();
+    }, interval);
+    
+    this.emit('debug', `Health check started with ${interval}ms interval`);
+  }
+  
+  /**
+   * Stop health check timer
+   */
+  private stopHealthCheck(): void {
+    if (this.healthCheckTimer) {
+      clearInterval(this.healthCheckTimer);
+      this.healthCheckTimer = null;
+      this.emit('debug', 'Health check stopped');
+    }
+  }
+  
+  /**
+   * Perform connection health check
+   */
+  private async performHealthCheck(): Promise<void> {
+    if (!this.ready || !this.transport.isConnected()) {
+      this.isHealthy = false;
+      return;
+    }
+    
+    try {
+      const method = this.config.healthCheck?.method ?? 'realpath';
+      
+      if (method === 'ping') {
+        await this.transport.ping();
+      } else if (method === 'realpath') {
+        await this.realPath('.');
+      }
+      
+      const wasUnhealthy = !this.isHealthy;
+      this.isHealthy = true;
+      
+      this.emit('healthCheck', { type: method, success: true, healthy: true });
+      
+      if (wasUnhealthy) {
+        this.emit('debug', 'Connection health restored');
+      }
+    } catch (error) {
+      this.isHealthy = false;
+      this.emit('healthCheck', { type: this.config.healthCheck?.method ?? 'realpath', success: false, healthy: false, error: error as Error });
+      this.emit('debug', `Health check failed: ${(error as Error).message}`);
+      
+      // Attempt auto-reconnect if enabled
+      if (this.config.autoReconnect?.enabled && !this.reconnecting) {
+        this.attemptReconnect();
+      }
+    }
+  }
+  
+  /**
+   * Attempt automatic reconnection with proper termination logic
+   */
+  private async attemptReconnect(): Promise<void> {
+    // Prevent concurrent reconnection attempts
+    if (this.reconnecting) return;
+    
+    const maxAttempts = this.config.autoReconnect?.maxAttempts ?? 3;
+    const initialDelay = this.config.autoReconnect?.delay ?? 1000;
+    const backoff = this.config.autoReconnect?.backoff ?? 2;
+    
+    // Check if max attempts already reached BEFORE starting
+    if (this.reconnectAttempts >= maxAttempts) {
+      this.emit('debug', `Max reconnect attempts (${maxAttempts}) reached`);
+      this.emit('reconnectFailed', { 
+        attempts: this.reconnectAttempts, 
+        maxAttempts,
+        lastError: this.lastReconnectError?.message
+      });
+      this.emit('close');
+      return;
+    }
+    
+    this.reconnecting = true;
+    this.reconnectAttempts++;
+    
+    const delay = initialDelay * Math.pow(backoff, this.reconnectAttempts - 1);
+    
+    this.emit('debug', `Attempting reconnect ${this.reconnectAttempts}/${maxAttempts} in ${delay}ms`);
+    this.emit('reconnectAttempt', { attempt: this.reconnectAttempts, maxAttempts, delay });
+    
+    setTimeout(async () => {
+      try {
+        // Clean up before reconnecting
+        this.cleanupPendingRequests();
+        
+        await this.originalConnect();
+        this.reconnecting = false;
+        this.reconnectAttempts = 0; // Reset on successful reconnection
+        this.lastReconnectError = null;
+        this.emit('debug', `Reconnect successful after ${this.reconnectAttempts} attempts`);
+        this.emit('reconnectSuccess', { attempts: this.reconnectAttempts });
+      } catch (error) {
+        this.lastReconnectError = error as Error;
+        this.reconnecting = false;
+        this.emit('debug', `Reconnect attempt ${this.reconnectAttempts} failed: ${(error as Error).message}`);
+        this.emit('reconnectError', { attempt: this.reconnectAttempts, error: error as Error });
+        
+        // Only retry if we haven't reached max attempts
+        if (this.reconnectAttempts < maxAttempts) {
+          this.attemptReconnect();
+        } else {
+          // Final failure - emit reconnectFailed
+          this.emit('debug', `Max reconnect attempts (${maxAttempts}) reached after failure`);
+          this.emit('reconnectFailed', { 
+            attempts: this.reconnectAttempts, 
+            maxAttempts,
+            lastError: this.lastReconnectError?.message 
+          });
+          this.emit('close');
+        }
+      }
+    }, delay);
+  }
+  
+  /**
+   * Clean up pending requests on disconnect/reconnect
+   */
+  private cleanupPendingRequests(): void {
+    for (const [id, request] of this.pendingRequests) {
+      // Clear any associated timeouts
+      if ((request as any).timeout) {
+        clearTimeout((request as any).timeout);
+      }
+      // Reject with connection error
+      request.reject(new Error('Connection lost during operation'));
+    }
+    this.pendingRequests.clear();
+  }
+  
+  /**
+   * Get connection health status
+   */
+  getHealthStatus(): { healthy: boolean; connected: boolean; ready: boolean } {
+    return {
+      healthy: this.isHealthy,
+      connected: this.transport.isConnected(),
+      ready: this.ready
+    };
+  }
+
+  /**
    * Check if connected and ready
    */
   isReady(): boolean {
     return this.ready && this.transport.isConnected();
+  }
+
+  /**
+   * Get current SSH channel window size for flow control
+   */
+  getCurrentWindowSize(): number {
+    return this.transport.getCurrentWindowSize();
+  }
+
+  /**
+   * Report transfer metrics for adaptive performance tuning
+   */
+  reportTransferMetrics(speedMBps: number, hadTimeout: boolean, responseTimeMs?: number): void {
+    this.transport.adaptPerformance(speedMBps, hadTimeout, responseTimeMs);
+  }
+
+  /**
+   * Get transport reference for direct access to adaptive methods
+   */
+  getTransport(): SSH2StreamsTransport {
+    return this.transport;
+  }
+
+  /**
+   * Calculate safe concurrency based on SSH window size and chunk size
+   */
+  getSafeConcurrency(chunkSize: number, maxConcurrency: number = 64): number {
+    return this.transport.getSafeConcurrency(chunkSize, maxConcurrency);
+  }
+
+  /**
+   * Get optimal concurrency based on window size and performance testing
+   */
+  getOptimalConcurrency(chunkSize: number): number {
+    return this.transport.getOptimalConcurrency(chunkSize);
+  }
+
+  /**
+   * Get maximum safe SFTP chunk size based on SSH packet limits
+   */
+  getMaxSafeChunkSize(): number {
+    return this.transport.getMaxSafeChunkSize();
+  }
+
+  /**
+   * Track operation for limit detection
+   */
+  private trackOperation(bytesTransferred: number = 0, operationType: string = 'READ'): void {
+    this.operationCount++;
+    this.bytesTransferred += bytesTransferred;
+    
+    // Emit debug info for operations that involve data transfer
+    if (bytesTransferred > 0) {
+      this.emit('debug', `Operation ${this.operationCount}: ${operationType} ${bytesTransferred} bytes (total: ${(this.bytesTransferred/(1024*1024)).toFixed(2)}MB)`);
+    }
+  }
+
+  /**
+   * Record server limit when timeout occurs
+   */
+  recordServerLimit(operationCount: number, bytesTransferred: number): void {
+    this.detectedOperationLimit = operationCount;
+    this.detectedDataLimit = bytesTransferred;
+    this.lastLimitDetectionTime = Date.now();
+    
+    const mbTransferred = (bytesTransferred / (1024 * 1024)).toFixed(2);
+    this.emit('debug', `Server limit detected: ${operationCount} operations, ${mbTransferred}MB`);
+    this.emit('serverLimitDetected', { operations: operationCount, bytes: bytesTransferred, mb: mbTransferred });
+  }
+
+  /**
+   * Check if we're approaching server limits
+   */
+  isApproachingLimit(): boolean {
+    // If we haven't detected limits yet, assume reasonable defaults
+    const operationLimit = this.detectedOperationLimit ?? 75; // Conservative default
+    const dataLimitMB = this.detectedDataLimit ? (this.detectedDataLimit / (1024 * 1024)) : 0.6; // 600KB default
+    
+    // Use 90% of detected limits as safety margin
+    const safeOperationLimit = Math.floor(operationLimit * 0.9);
+    const safeDataLimitBytes = Math.floor(dataLimitMB * 0.9 * 1024 * 1024);
+    
+    const approachingOperationLimit = this.operationCount >= safeOperationLimit;
+    const approachingDataLimit = this.bytesTransferred >= safeDataLimitBytes;
+    
+    if (approachingOperationLimit || approachingDataLimit) {
+      this.emit('debug', `Approaching limits: ops ${this.operationCount}/${safeOperationLimit}, data ${(this.bytesTransferred/(1024*1024)).toFixed(2)}MB/${(safeDataLimitBytes/(1024*1024)).toFixed(2)}MB`);
+      return true;
+    }
+    
+    return false;
+  }
+
+  /**
+   * Reset operation counters (call after reconnection)
+   */
+  resetOperationCounters(): void {
+    this.operationCount = 0;
+    this.bytesTransferred = 0;
+    this.emit('debug', 'Operation counters reset after reconnection');
+  }
+
+  /**
+   * Get current operation statistics
+   */
+  getOperationStats(): { operations: number; bytesTransferred: number; mbTransferred: number; detectedLimits: { operations: number | null; bytes: number | null } } {
+    return {
+      operations: this.operationCount,
+      bytesTransferred: this.bytesTransferred,
+      mbTransferred: this.bytesTransferred / (1024 * 1024),
+      detectedLimits: {
+        operations: this.detectedOperationLimit,
+        bytes: this.detectedDataLimit
+      }
+    };
   }
 }

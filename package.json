@@ -1,6 +1,6 @@
 {
   "name": "pure-js-sftp",
-  "version": "4.0.1",
+  "version": "5.0.0",
   "description": "A pure JavaScript SFTP client with revolutionary RSA-SHA2 compatibility fixes. Zero native dependencies, built on ssh2-streams with 100% SSH key support.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -9,9 +9,13 @@
     "dev": "tsc --watch",
     "lint": "ESLINT_USE_FLAT_CONFIG=false eslint src/**/*.ts",
     "lint:fix": "ESLINT_USE_FLAT_CONFIG=false eslint src/**/*.ts --fix",
-    "test": "npm run build && node test/comprehensive-parser-test.js && node test/vscode-pure-js-connection-test.js",
+    "test": "npm run build && node test/comprehensive-parser-test.js && node test/vscode-pure-js-connection-test.js && node test/comprehensive-size-test.js",
     "test:parser": "npm run build && node test/comprehensive-parser-test.js",
     "test:vscode": "npm run build && node test/vscode-pure-js-connection-test.js",
+    "test:v5": "npm run build && node test/comprehensive-size-test.js",
+    "test:reconnection": "npm run build && node test/test-1mb-reconnection.js",
+    "test:events": "npm run build && node test/enhanced-events-test.js",
+    "test:api": "npm run build && node test/api-verification-test.js",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
