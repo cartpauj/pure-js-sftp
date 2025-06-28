@@ -834,31 +834,42 @@ export class SftpClient extends EventEmitter {
       this.checkConnection();
       
       const localPath = typeof dst === 'string' ? dst : undefined;
-      const operation = this.createOperation('download', localPath, remotePath);
-      const operationId = this.generateOperationId();
       
-      // Get file stats first for size info
-      let fileSize = 0;
-      try {
-        const stats = await this.client!.stat(remotePath);
-        fileSize = stats.size || 0;
-      } catch (error) {
-        // Continue without size info
-      }
+      // Use enhanced events if enabled, otherwise use legacy events
+      let operation: ActiveOperation | undefined;
+      let operationId: string;
+      let startEvent: EnhancedOperationEvent | undefined;
       
-      // Emit enhanced operation start event
-      const startEvent: EnhancedOperationEvent = {
-        type: 'download',
-        operation_id: operationId,
-        remotePath,
-        totalBytes: fileSize,
-        fileName: this.extractFileName(remotePath),
-        startTime: Date.now()
-      };
-      if (localPath) {
-        startEvent.localPath = localPath;
+      if (this.eventOptions.enableProgressEvents) {
+        // Enhanced event system
+        operationId = this.generateOperationId();
+        
+        // Get file stats first for size info
+        let fileSize = 0;
+        try {
+          const stats = await this.client!.stat(remotePath);
+          fileSize = stats.size || 0;
+        } catch (error) {
+          // Continue without size info
+        }
+        
+        startEvent = {
+          type: 'download',
+          operation_id: operationId,
+          remotePath,
+          totalBytes: fileSize,
+          fileName: this.extractFileName(remotePath),
+          startTime: Date.now()
+        };
+        if (localPath) {
+          startEvent.localPath = localPath;
+        }
+        this.emitOperationStart(startEvent);
+      } else {
+        // Legacy event system
+        operation = this.createOperation('download', localPath, remotePath);
+        operationId = operation.id;
       }
-      this.emitOperationStart(startEvent);
       
       try {
         let handle = await this.client!.openFile(remotePath, SFTP_OPEN_FLAGS.READ);
@@ -906,7 +917,18 @@ export class SftpClient extends EventEmitter {
                   consecutiveSuccesses++;
                   
                   // Update progress
-                  this.updateOperationProgress(operation, offset, fileSize);
+                  if (this.eventOptions.enableProgressEvents && startEvent) {
+                    // Enhanced progress event
+                    const progressEvent: EnhancedOperationEvent = {
+                      ...startEvent,
+                      bytesTransferred: offset,
+                      totalBytes: fileSize
+                    };
+                    this.emitOperationProgress(progressEvent);
+                  } else if (operation) {
+                    // Legacy progress event
+                    this.updateOperationProgress(operation, offset, fileSize);
+                  }
                   
                   // Aggressive server-friendly throttling for large files
                   const transport = this.client!.getTransport();
@@ -985,7 +1007,18 @@ export class SftpClient extends EventEmitter {
           }
           
           // Update final progress
-          this.updateOperationProgress(operation, fileBuffer.length, fileBuffer.length);
+          if (this.eventOptions.enableProgressEvents && startEvent) {
+            // Enhanced final progress event
+            const progressEvent: EnhancedOperationEvent = {
+              ...startEvent,
+              bytesTransferred: fileBuffer.length,
+              totalBytes: fileBuffer.length
+            };
+            this.emitOperationProgress(progressEvent);
+          } else if (operation) {
+            // Legacy final progress event
+            this.updateOperationProgress(operation, fileBuffer.length, fileBuffer.length);
+          }
           
           let result: string | Writable | Buffer;
           if (dst === undefined) {
@@ -1009,10 +1042,32 @@ export class SftpClient extends EventEmitter {
             });
           }
           
-          this.completeOperation(operation);
+          if (this.eventOptions.enableProgressEvents && startEvent) {
+            // Enhanced completion event
+            const completeEvent: EnhancedOperationEvent = {
+              ...startEvent,
+              duration: Date.now() - startEvent.startTime,
+              bytesTransferred: fileSize
+            };
+            this.emitOperationComplete(completeEvent);
+          } else if (operation) {
+            // Legacy completion event
+            this.completeOperation(operation);
+          }
           return result;
         } catch (error) {
-          this.failOperation(operation, error instanceof Error ? error : new Error(String(error)));
+          if (this.eventOptions.enableProgressEvents && startEvent) {
+            // Enhanced error event
+            const errorEvent: EnhancedOperationEvent = {
+              ...startEvent,
+              duration: Date.now() - startEvent.startTime,
+              error: error instanceof Error ? error : new Error(String(error))
+            };
+            this.emitOperationError(errorEvent);
+          } else if (operation) {
+            // Legacy error event
+            this.failOperation(operation, error instanceof Error ? error : new Error(String(error)));
+          }
           throw error;
         } finally {
           try {
@@ -1023,7 +1078,18 @@ export class SftpClient extends EventEmitter {
           }
         }
       } catch (error) {
-        this.failOperation(operation, error instanceof Error ? error : new Error(String(error)));
+        if (this.eventOptions.enableProgressEvents && startEvent) {
+          // Enhanced error event
+          const errorEvent: EnhancedOperationEvent = {
+            ...startEvent,
+            duration: Date.now() - startEvent.startTime,
+            error: error instanceof Error ? error : new Error(String(error))
+          };
+          this.emitOperationError(errorEvent);
+        } else if (operation) {
+          // Legacy error event
+          this.failOperation(operation, error instanceof Error ? error : new Error(String(error)));
+        }
         throw error;
       }
     });
@@ -1038,37 +1104,48 @@ export class SftpClient extends EventEmitter {
       this.checkConnection();
       
       const localPath = typeof input === 'string' ? input : undefined;
-      const operation = this.createOperation('upload', localPath, remotePath);
-      const operationId = this.generateOperationId();
       
-      // Estimate file size if possible
-      let fileSize = 0;
-      if (typeof input === 'string') {
-        try {
-          const stats = require('fs').statSync(input);
-          fileSize = stats.size;
-        } catch (error) {
-          // Continue without size info
+      // Use enhanced events if enabled, otherwise use legacy events
+      let operation: ActiveOperation | undefined;
+      let operationId: string;
+      let startEvent: EnhancedOperationEvent | undefined;
+      
+      if (this.eventOptions.enableProgressEvents) {
+        // Enhanced event system
+        operationId = this.generateOperationId();
+        
+        // Estimate file size if possible
+        let fileSize = 0;
+        if (typeof input === 'string') {
+          try {
+            const stats = require('fs').statSync(input);
+            fileSize = stats.size;
+          } catch (error) {
+            // Continue without size info
+          }
+        } else if (Buffer.isBuffer(input)) {
+          fileSize = input.length;
         }
-      } else if (Buffer.isBuffer(input)) {
-        fileSize = input.length;
+        
+        startEvent = {
+          type: 'upload',
+          operation_id: operationId,
+          remotePath,
+          fileName: this.extractFileName(remotePath),
+          startTime: Date.now()
+        };
+        if (localPath) {
+          startEvent.localPath = localPath;
+        }
+        if (fileSize > 0) {
+          startEvent.totalBytes = fileSize;
+        }
+        this.emitOperationStart(startEvent);
+      } else {
+        // Legacy event system
+        operation = this.createOperation('upload', localPath, remotePath);
+        operationId = operation.id;
       }
-      
-      // Emit enhanced operation start event
-      const startEvent: EnhancedOperationEvent = {
-        type: 'upload',
-        operation_id: operationId,
-        remotePath,
-        fileName: this.extractFileName(remotePath),
-        startTime: Date.now()
-      };
-      if (localPath) {
-        startEvent.localPath = localPath;
-      }
-      if (fileSize > 0) {
-        startEvent.totalBytes = fileSize;
-      }
-      this.emitOperationStart(startEvent);
       
       try {
         this.emit('debug', `Starting upload to: ${remotePath}`);
@@ -1121,13 +1198,35 @@ export class SftpClient extends EventEmitter {
           }
           
           // Update operation with total bytes
-          this.updateOperationProgress(operation, 0, dataBuffer.length);
+          if (this.eventOptions.enableProgressEvents && startEvent) {
+            // Enhanced initial progress event
+            const progressEvent: EnhancedOperationEvent = {
+              ...startEvent,
+              bytesTransferred: 0,
+              totalBytes: dataBuffer.length
+            };
+            this.emitOperationProgress(progressEvent);
+          } else if (operation) {
+            // Legacy initial progress event
+            this.updateOperationProgress(operation, 0, dataBuffer.length);
+          }
           
           // Check if dataBuffer is empty (this could cause issues)
           if (dataBuffer.length === 0) {
             this.emit('debug', `Warning: Attempting to upload empty file`);
             // Create empty file by just closing the handle
-            this.completeOperation(operation);
+            if (this.eventOptions.enableProgressEvents && startEvent) {
+              // Enhanced completion event for empty file
+              const completeEvent: EnhancedOperationEvent = {
+                ...startEvent,
+                duration: Date.now() - startEvent.startTime,
+                bytesTransferred: 0
+              };
+              this.emitOperationComplete(completeEvent);
+            } else if (operation) {
+              // Legacy completion event for empty file
+              this.completeOperation(operation);
+            }
             return remotePath;
           }
           
@@ -1253,7 +1352,20 @@ export class SftpClient extends EventEmitter {
                     
                     totalBytesWritten += batchBytesWritten;
                     pipelinedOffset = batchOffset;
-                    this.updateOperationProgress(operation, totalBytesWritten, dataBuffer.length);
+                    
+                    // Update progress
+                    if (this.eventOptions.enableProgressEvents && startEvent) {
+                      // Enhanced progress event
+                      const progressEvent: EnhancedOperationEvent = {
+                        ...startEvent,
+                        bytesTransferred: totalBytesWritten,
+                        totalBytes: dataBuffer.length
+                      };
+                      this.emitOperationProgress(progressEvent);
+                    } else if (operation) {
+                      // Legacy progress event
+                      this.updateOperationProgress(operation, totalBytesWritten, dataBuffer.length);
+                    }
                     
                     // Batch succeeded - apply success logic
                     handleChunkSuccess();
@@ -1342,7 +1454,18 @@ export class SftpClient extends EventEmitter {
               offset += chunk.length;
               
               // Update progress
-              this.updateOperationProgress(operation, offset, dataBuffer.length);
+              if (this.eventOptions.enableProgressEvents && startEvent) {
+                // Enhanced progress event
+                const progressEvent: EnhancedOperationEvent = {
+                  ...startEvent,
+                  bytesTransferred: offset,
+                  totalBytes: dataBuffer.length
+                };
+                this.emitOperationProgress(progressEvent);
+              } else if (operation) {
+                // Legacy progress event
+                this.updateOperationProgress(operation, offset, dataBuffer.length);
+              }
               
               // Use shared chunking logic
               handleChunkSuccess();
@@ -1390,10 +1513,32 @@ export class SftpClient extends EventEmitter {
             this.emit('debug', `Upload verification failed: ${verifyError instanceof Error ? verifyError.message : String(verifyError)}`);
           }
           
-          this.completeOperation(operation);
+          if (this.eventOptions.enableProgressEvents && startEvent) {
+            // Enhanced completion event
+            const completeEvent: EnhancedOperationEvent = {
+              ...startEvent,
+              duration: Date.now() - startEvent.startTime,
+              bytesTransferred: startEvent.totalBytes || 0
+            };
+            this.emitOperationComplete(completeEvent);
+          } else if (operation) {
+            // Legacy completion event
+            this.completeOperation(operation);
+          }
           return remotePath;
         } catch (error) {
-          this.failOperation(operation, error instanceof Error ? error : new Error(String(error)));
+          if (this.eventOptions.enableProgressEvents && startEvent) {
+            // Enhanced error event
+            const errorEvent: EnhancedOperationEvent = {
+              ...startEvent,
+              duration: Date.now() - startEvent.startTime,
+              error: error instanceof Error ? error : new Error(String(error))
+            };
+            this.emitOperationError(errorEvent);
+          } else if (operation) {
+            // Legacy error event
+            this.failOperation(operation, error instanceof Error ? error : new Error(String(error)));
+          }
           throw error;
         } finally {
           try {
@@ -1404,7 +1549,18 @@ export class SftpClient extends EventEmitter {
           }
         }
       } catch (error) {
-        this.failOperation(operation, error instanceof Error ? error : new Error(String(error)));
+        if (this.eventOptions.enableProgressEvents && startEvent) {
+          // Enhanced error event
+          const errorEvent: EnhancedOperationEvent = {
+            ...startEvent,
+            duration: Date.now() - startEvent.startTime,
+            error: error instanceof Error ? error : new Error(String(error))
+          };
+          this.emitOperationError(errorEvent);
+        } else if (operation) {
+          // Legacy error event
+          this.failOperation(operation, error instanceof Error ? error : new Error(String(error)));
+        }
         throw error;
       }
     });

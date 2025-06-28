@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [5.0.1] - 2025-06-28
+
+### 🐛 **Bug Fixes**
+
+#### **Event System**
+- **Fixed duplicate event emission**: Enhanced events now properly replace legacy events instead of running alongside them
+  - When `enableProgressEvents` is enabled, only enhanced events are emitted
+  - When `enableProgressEvents` is disabled, only legacy events are emitted
+  - Resolves issue where both `{ operation_id: undefined }` and `{ operation_id: 'op_1_123' }` events were emitted for the same operation
+  - Affects `operationStart`, `operationComplete`, `operationProgress`, and `operationError` events
+  - Backwards compatible: existing applications continue to work without changes
+
 ## [5.0.0] - 2025-06-27
 
 ### 🚀 **MAJOR RELEASE: Revolutionary Server Adaptation & Performance Optimization**

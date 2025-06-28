@@ -266,7 +266,7 @@ const client = new SftpClient('my-client', {
   queueOnLimit: true        // Queue operations when limit reached (default: false)
 });
 
-// Monitor operations in real-time
+// Monitor operations in real-time (default legacy events)
 client.on('operationStart', (operation) => {
   console.log(`Started ${operation.type}: ${operation.remotePath}`);
 });
@@ -282,6 +282,9 @@ client.on('operationComplete', (operation) => {
   const duration = Date.now() - operation.startTime;
   console.log(`Completed ${operation.type} in ${duration}ms`);
 });
+
+// For enhanced events with operation IDs, use:
+// client.setEventOptions({ enableProgressEvents: true });
 
 // Get real-time operation status
 console.log(`Active: ${client.getActiveOperationCount()}`);
@@ -622,10 +625,13 @@ const sftp = new SftpClient('vscode-extension');
 
 // Configure events for VSCode-like usage
 sftp.setEventOptions({
-  enableProgressEvents: true,
+  enableProgressEvents: true,    // Use enhanced events with operation IDs
   enablePerformanceEvents: false,
   progressThrottle: 100 // Max one progress event per 100ms
 });
+
+// Note: When enableProgressEvents is true, only enhanced events are emitted
+// When enableProgressEvents is false, only legacy events are emitted (for backwards compatibility)
 
 // Connection lifecycle events
 sftp.on('connectionStart', (data) => {
@@ -703,6 +709,7 @@ sftp.on('operationComplete', (data) => {
 - 🧠 **Memory Management**: Automatic event history cleanup
 - ⚙️ **Configurable Options**: Enable/disable event types as needed
 - 🔧 **Complete Method Coverage**: All file operations (upload, download, rename, chmod, etc.) emit enhanced events
+- ✅ **No Duplicate Events**: Enhanced events properly replace legacy events (fixed in v5.0.1)
 
 **Perfect for:**
 - VSCode extension status bars and progress indicators
@@ -1268,8 +1275,9 @@ interface ActiveOperation {
 
 #### Operation Lifecycle Events
 
+**Legacy Events (default, enableProgressEvents: false):**
 ```typescript
-// Listen to operation events
+// Listen to legacy operation events (for backwards compatibility)
 client.on('operationStart', (operation: ActiveOperation) => {
   console.log(`Started ${operation.type}: ${operation.remotePath}`);
 });
@@ -1290,6 +1298,34 @@ client.on('operationError', (operation: ActiveOperation, error: Error) => {
   console.log(`Failed ${operation.type}: ${error.message}`);
 });
 ```
+
+**Enhanced Events (enableProgressEvents: true):**
+```typescript
+// Configure enhanced events
+client.setEventOptions({ enableProgressEvents: true });
+
+// Listen to enhanced operation events with operation IDs
+client.on('operationStart', (event: EnhancedOperationEvent) => {
+  console.log(`Started ${event.type} [${event.operation_id}]: ${event.fileName}`);
+});
+
+client.on('operationProgress', (event: EnhancedOperationEvent) => {
+  if (event.totalBytes && event.bytesTransferred) {
+    const progress = Math.round((event.bytesTransferred / event.totalBytes) * 100);
+    console.log(`${event.type} [${event.operation_id}] progress: ${progress}%`);
+  }
+});
+
+client.on('operationComplete', (event: EnhancedOperationEvent) => {
+  console.log(`Completed ${event.type} [${event.operation_id}] in ${event.duration}ms`);
+});
+
+client.on('operationError', (event: EnhancedOperationEvent) => {
+  console.log(`Failed ${event.type} [${event.operation_id}]: ${event.error?.message}`);
+});
+```
+
+> **Note**: The library uses **either** legacy events **or** enhanced events, never both simultaneously. This ensures clean event handling without duplicates (fixed in v5.0.1).
 
 #### Concurrency Management
 
