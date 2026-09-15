@@ -3,6 +3,8 @@
  * Handles encrypted OpenSSH format keys without external dependencies
  */
 
+import { writeTempScript, runTempScript, removeTempScript } from '../utils/child-crypto';
+
 // Pure JavaScript OpenSSH parser - no direct crypto imports
 
 // Implement bcrypt-pbkdf using child process with correct API
@@ -124,16 +126,12 @@ function decryptWithChildProcess(
   rounds: number,
   passphrase: string
 ): Buffer {
-  const fs = require('fs');
-  const { execSync } = require('child_process');
-  const tempFilename = '/tmp/openssh_decrypt_' + Math.random().toString(36).substring(7) + '.js';
-  
-  // Get bcrypt-pbkdf path
-  const bcryptPbkdfPath = require.resolve('bcrypt-pbkdf');
-  
+  // Get bcrypt-pbkdf path (JSON-encoded so Windows backslashes survive the string literal)
+  const bcryptPbkdfPath = JSON.stringify(require.resolve('bcrypt-pbkdf'));
+
   const decryptScript = `
 const crypto = require('crypto');
-const bcryptPbkdf = require('${bcryptPbkdfPath}');
+const bcryptPbkdf = require(${bcryptPbkdfPath});
 
 try {
   const input = JSON.parse(process.argv[2]);
@@ -204,9 +202,9 @@ try {
 }
 `;
 
+  const tempFilename = writeTempScript('openssh_decrypt', decryptScript);
+
   try {
-    fs.writeFileSync(tempFilename, decryptScript);
-    
     const input = {
       encryptedData: encryptedData.toString('base64'),
       cipherName,
@@ -215,17 +213,16 @@ try {
       passphrase
     };
     
-    const result = execSync(`node "${tempFilename}" '${JSON.stringify(input)}'`, {
-      encoding: 'utf8',
+    const result = runTempScript(tempFilename, input, {
       timeout: 10000,
       maxBuffer: 10 * 1024 * 1024 // 10MB
     });
-    
-    fs.unlinkSync(tempFilename);
+
+    removeTempScript(tempFilename);
     return Buffer.from(result, 'base64');
-    
+
   } catch (error) {
-    try { fs.unlinkSync(tempFilename); } catch {}
+    removeTempScript(tempFilename);
     throw new Error('OpenSSH decryption failed in child process: ' + (error instanceof Error ? error.message : String(error)));
   }
 }

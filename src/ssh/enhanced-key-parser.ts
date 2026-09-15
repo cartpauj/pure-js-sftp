@@ -4,6 +4,7 @@
  */
 import { parseOpenSSHPrivateKey } from './openssh-key-parser';
 import { encodeLength } from '../utils/asn1-utils';
+import { writeTempScript, runTempScript, removeTempScript } from '../utils/child-crypto';
 // Hash algorithm functions are defined inline in child process scripts
 // All crypto operations moved to child processes for pure JS compatibility
 
@@ -123,9 +124,6 @@ function decryptOpenSSHWithBcryptPbkdf(keyData: string, passphrase: string): str
 
 // Extract SSH public key using child process
 function extractPublicKeyWithChildProcess(keyString: string, passphrase: string | undefined, keyType: string): Buffer {
-  const fs = require('fs');
-  const { execSync } = require('child_process');
-  const tempFilename = '/tmp/ssh_pubkey_' + Math.random().toString(36).substring(7) + '.js';
   
   const extractScript = `
 const crypto = require('crypto');
@@ -181,22 +179,17 @@ try {
     process.exit(1);
 }`;
   
+  const tempFilename = writeTempScript('ssh_pubkey', extractScript);
+
   try {
-    fs.writeFileSync(tempFilename, extractScript);
-    
-    const input = JSON.stringify({
+    const result = runTempScript(tempFilename, {
       privateKey: keyString,
       passphrase: passphrase || undefined,
       keyType: keyType
     });
-    
-    const result = execSync(`node ${tempFilename} ${JSON.stringify(input)}`, {
-      encoding: 'utf8',
-      stdio: 'pipe'
-    });
-    
-    fs.unlinkSync(tempFilename);
-    
+
+    removeTempScript(tempFilename);
+
     const parsed = JSON.parse(result.trim());
     
     if (parsed.type === 'rsa') {
@@ -215,7 +208,7 @@ try {
     throw new Error('Unknown public key type returned');
     
   } catch (error) {
-    try { fs.unlinkSync(tempFilename); } catch {}
+    removeTempScript(tempFilename);
     throw error;
   }
 }
@@ -514,10 +507,6 @@ function convertRSAOpenSSHToPEM(decryptedData: any): string {
 }
 
 function signWithSystemCrypto(keyInput: string, passphrase: string | undefined, data: Buffer, keyType?: string, algorithm?: string): Buffer {
-  const fs = require('fs');
-  const { execSync } = require('child_process');
-  const tempFilename = '/tmp/ssh_sign_' + Math.random().toString(36).substring(7) + '.js';
-  
   // Convert OpenSSH key to traditional PEM format BEFORE creating child process
   let traditionalPem: string;
   
@@ -635,27 +624,22 @@ try {
     process.exit(1);
 }`;
   
+  const tempFilename = writeTempScript('ssh_sign', signingScript);
+
   try {
-    fs.writeFileSync(tempFilename, signingScript);
-    
-    const input = JSON.stringify({
+    const result = runTempScript(tempFilename, {
       privateKey: traditionalPem,
       passphrase: passphrase || undefined,
       data: data.toString('base64'),
       keyType: keyType,
       algorithm: algorithm
     });
-    
-    const result = execSync(`node ${tempFilename} ${JSON.stringify(input)}`, {
-      encoding: 'utf8',
-      stdio: 'pipe'
-    });
-    
-    fs.unlinkSync(tempFilename);
+
+    removeTempScript(tempFilename);
     return Buffer.from(result.trim(), 'base64');
-    
+
   } catch (error) {
-    try { fs.unlinkSync(tempFilename); } catch {}
+    removeTempScript(tempFilename);
     throw error;
   }
 }

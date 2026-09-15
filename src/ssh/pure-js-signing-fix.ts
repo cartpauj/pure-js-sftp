@@ -1,5 +1,6 @@
 import * as crypto from 'crypto';
 import * as ssh2Streams from 'ssh2-streams';
+import { writeTempScript, runTempScript, removeTempScript } from '../utils/child-crypto';
 // Hash algorithm functions are defined inline in child process scripts
 
 let signingFixEnabled = false;
@@ -133,9 +134,6 @@ function signWithPureJSCrypto(traditionalPem: string, passphrase: string | undef
 }
 
 function signWithSystemCrypto(traditionalPem: string, passphrase: string | undefined, data: Buffer, keyType?: string): Buffer {
-  const fs = require('fs');
-  const { execSync } = require('child_process');
-  const tempFilename = '/tmp/ssh_sign_' + Math.random().toString(36).substring(7) + '.js';
   
   const signingScript = `
 const crypto = require('crypto');
@@ -230,26 +228,21 @@ try {
     process.exit(1);
 }`;
   
+  const tempFilename = writeTempScript('ssh_sign', signingScript);
+
   try {
-    fs.writeFileSync(tempFilename, signingScript);
-    
-    const input = JSON.stringify({
+    const result = runTempScript(tempFilename, {
       privateKey: traditionalPem,
       passphrase: passphrase || undefined,
       data: data.toString('base64'),
       keyType: keyType
     });
-    
-    const result = execSync(`node ${tempFilename} ${JSON.stringify(input)}`, {
-      encoding: 'utf8',
-      stdio: 'pipe'
-    });
-    
-    fs.unlinkSync(tempFilename);
+
+    removeTempScript(tempFilename);
     return Buffer.from(result.trim(), 'base64');
-    
+
   } catch (error) {
-    try { fs.unlinkSync(tempFilename); } catch {}
+    removeTempScript(tempFilename);
     throw error;
   }
 }

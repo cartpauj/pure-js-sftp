@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [5.0.2] - 2026-09-15
+
+### 🐛 **Bug Fixes**
+
+#### **Windows Compatibility**
+- **Fixed key parsing and signing on Windows**: Crypto operations delegated to a child process made POSIX-only assumptions that failed on Windows ([#2](https://github.com/cartpauj/pure-js-sftp/issues/2))
+  - Temp scripts were written to a hardcoded `/tmp/`, which does not exist on Windows - now uses `os.tmpdir()`
+  - The child process was spawned as a bare `node`, assuming it was on `PATH` - now uses `process.execPath`, the already-running Node binary
+  - Arguments were passed through a shell using single quotes, which `cmd.exe` does not treat as quoting - now uses `execFileSync` with an argument array, so no shell is involved
+  - The resolved `bcrypt-pbkdf` path was interpolated into a generated script as a raw string literal, so Windows backslashes were read as escape sequences - now JSON-encoded
+  - RSA keys were the most visible symptom, as they route through two of the affected paths on every connection
+  - Added `windowsHide` so no console window flashes when the host application is a GUI process such as VS Code
+  - Debug log now written to the OS temp directory instead of `/tmp/`
+
 ## [5.0.1] - 2025-06-28
 
 ### 🐛 **Bug Fixes**

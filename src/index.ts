@@ -9,6 +9,7 @@ import { SFTP_OPEN_FLAGS, SFTP_STATUS, SFTPError } from './ssh/types';
 import * as fs from 'fs';
 import * as fsPromises from 'fs/promises';
 import * as path from 'path';
+import * as os from 'os';
 import { EventEmitter } from 'events';
 import { Readable, Writable } from 'stream';
 
@@ -220,7 +221,7 @@ export class SftpClient extends EventEmitter {
       try {
         const fs = require('fs');
         const debugMsg = `${new Date().toISOString()} - ${msg}\\n`;
-        fs.appendFileSync('/tmp/pure-js-sftp-debug.log', debugMsg);
+        fs.appendFileSync(path.join(os.tmpdir(), 'pure-js-sftp-debug.log'), debugMsg);
       } catch (e) { /* ignore */ }
     });
 
